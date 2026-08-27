@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FSBHOA Kiosk</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="setup-screen" style="display:none; padding: 50px; text-align: center;">
+        <h1>Kiosk Setup</h1>
+        <p>This station is not configured. Please select its location:</p>
+        <select id="kiosk-location-select" style="font-size: 18px; padding: 10px; margin: 20px;"></select>
+        <br>
+        <button onclick="saveKioskIdentity()" style="font-size: 18px; padding: 10px 20px;">Save Configuration</button>
+    </div>
+    <input type="text" readonly inputmode="none" id="card-reader-input" style="position: absolute; left: -9999px;">
+
+    <div id="idle-screen">
+        <img id="logo-image" src="" alt="HOA Logo" style="visibility: hidden; max-width: 80%; max-height: 300px; margin: 20px auto; display: block;">
+        <h1>Welcome to the Lodge</h1>
+    </div>
+    <h2 id="status-message">Status: Connecting...</h2>
+    <hr>
+
+    <div id="splash-screen">
+        <img id="splash-image" src="" alt="Thank You">
+    </div>
+
+
+    <table id="main-layout-table">
+        <tr>
+            <td id="left-column-cell">
+                <div id="last-card-swipe" style="font-size: 24px; font-weight: bold; min-height: 30px;"></div>
+
+                <div id="guest-buttons-container" class="kiosk-step-container">
+                    <h2>How many guests are with you?</h2>
+                    <div id="guest-buttons"></div>
+                </div>
+                <div id="amenity-buttons-container" class="kiosk-step-container">
+                    <h2 class="amenity-title">Please select a destination</h2>
+                    <div id="amenity-buttons"></div>
+                </div>
+            </td>
+
+            <td id="right-column-cell">
+                <div id="card-display" class="card-display-hidden">
+                    <img id="card-photo" src="" alt="Cardholder Photo">
+                    <div id="card-name"></div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <script src="/app.js"></script>
+
+    <style>
+        #debug-log {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 450px; /* Slightly wider for better readability */
+            height: 300px; /* Taller */
+            background-color: rgba(0, 0, 0, 0.85); /* Darker for better contrast */
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            border: 2px solid #444;
+            overflow-y: scroll;
+            padding: 10px;
+            z-index: 100000; /* Ensure it stays above everything */
+            display: none;
+            text-align: left; /* FORCE LEFT JUSTIFICATION */
+            white-space: pre-wrap; /* Preserve spaces and wrap lines */
+            user-select: text; /* Explicitly allow text selection/copying */
+            pointer-events: auto; /* Ensure clicks/drags are captured */
+        }
+    </style>
+    <div id="debug-log"></div>
+    </body>
+</html>

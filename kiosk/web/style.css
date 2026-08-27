@@ -1,0 +1,166 @@
+body {
+    font-family: sans-serif;
+    text-align: center;
+}
+
+#main-layout-table {
+    width: 100%;
+    padding: 20px;
+    border-spacing: 20px; /* This acts like the 'gap' property */
+    display: none; /* The table is hidden until a valid card is swiped */
+}
+
+#left-column-cell {
+    vertical-align: top;
+}
+
+#right-column-cell {
+    width: 250px;
+    vertical-align: top;
+}
+
+/* --- Amenity & Guest Button Styles (Unchanged) --- */
+
+#amenity-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: flex-start;
+}
+
+.amenity-button {
+    width: 150px;
+    height: 150px;
+    border: 2px solid #ccc;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: bold;
+    background-color: #f0f0f0;
+    transition: all 0.2s;
+}
+
+.amenity-button:hover {
+    border-color: #0073aa;
+    background-color: #eaf6ff;
+}
+
+.amenity-button img {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    margin-bottom: 10px;
+}
+
+.amenity-title {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+#guest-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 20px;
+    padding: 20px;
+}
+
+.guest-button {
+    width: 80px;
+    height: 80px;
+    border: 2px solid #ccc;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    font-weight: bold;
+    background-color: #f0f0f0;
+    transition: all 0.2s;
+}
+
+.guest-button:hover {
+    border-color: #0073aa;
+    background-color: #eaf6ff;
+}
+
+.guest-button.selected {
+    border-color: #0073aa;
+    background-color: #0073aa;
+    color: #fff;
+}
+
+/* --- Card Display Styles (Unchanged) --- */
+
+#card-display {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    padding: 15px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    opacity: 0;
+    transition: opacity 0.5s;
+}
+
+#card-display.card-display-visible {
+    opacity: 1;
+}
+
+#card-photo {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    border-radius: 5px;
+    background-color: #eee;
+}
+
+#card-name {
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+    margin-top: 10px;
+}
+
+/* --- Container Visibility (Unchanged) --- */
+
+.kiosk-step-container {
+    display: none; /* Hide steps by default */
+}
+
+
+/* --- Splash Screen Styles  --- */
+#splash-screen {
+    display: none; /* Hidden by default */
+    width: 100%;
+    /* Use flexbox to easily center the image inside */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Define a flexible height to fill space */
+    flex-grow: 1;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+#splash-image {
+    width: 400px;
+    height: 400px;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+
+#card-reader-input:focus {
+    outline: none !important;
+    border: none !important;
+    caret-color: transparent !important;
+}
