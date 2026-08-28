@@ -280,7 +280,10 @@ function connect() {
                     if (swipeData.cardholder.photo) {
                         cardPhoto.src = `data:image/jpeg;base64,${swipeData.cardholder.photo}`;
                     } else {
-                        cardPhoto.src = '';
+                        // Fallback generic silhouette using an inline SVG
+                        cardPhoto.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23aaaaaa"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+                        //cardPhoto.style.padding = '20px'; // Give the icon some breathing room
+                        cardPhoto.style.backgroundColor = '#f0f0f1'; // Light grey background
                     }
                     cardDisplay.className = 'card-display-visible';
                     selectedGuestCount = 0;
@@ -375,6 +378,8 @@ function createAmenityButtons(amenities) {
                         door_number: finalDoorNumber
                     }
                 };
+                // Add this line so we can see it in the debug window!
+                logToScreen(`Sending amenitySelected: ${JSON.stringify(messageToSend)}`);
                 socket.send(JSON.stringify(messageToSend));
             } catch (e) {
                 logToScreen(`CRITICAL ERROR: Send failed. ${e.message}`);
@@ -443,6 +448,10 @@ function resetKiosk() {
 }
 
 function forceFocus() {
+    // If the debug log is open, stop fighting the user for the cursor!
+    if (localStorage.getItem('kioskLogVisible') === 'true') {
+        return;
+    }
     cardReaderInput.focus();
 }
 
@@ -484,13 +493,13 @@ function stopFocusCapture() {
 }
 
 function toggleLogVisibility() {
-    const logContainer = document.getElementById('debug-log');
-    if (window.getComputedStyle(logContainer).display === 'none') {
-        logContainer.style.display = 'block';
+    const wrapper = document.getElementById('debug-wrapper');
+    if (window.getComputedStyle(wrapper).display === 'none') {
+        wrapper.style.display = 'block';
         localStorage.setItem('kioskLogVisible', 'true');
         logToScreen('Debug log enabled.');
     } else {
-        logContainer.style.display = 'none';
+        wrapper.style.display = 'none';
         localStorage.setItem('kioskLogVisible', 'false');
     }
 }
@@ -540,8 +549,25 @@ function setupLogoGestures() {
     logoImage.addEventListener('mouseup', () => clearTimeout(logoLongPressTimer));
 }
 
+window.triggerManualSwipe = function() {
+    const cardNum = "11111111";
+    logToScreen(`Simulating swipe for: ${cardNum}`);
+
+    socket.send(JSON.stringify({
+        event: 'manualSwipe',
+        payload: { rfid: cardNum }
+    }));
+};
+
+
+
 setInterval(() => {
     if (!sessionActive) {
+        // Suspend the watchdog while debugging so you can highlight text
+        if (localStorage.getItem('kioskLogVisible') === 'true') {
+            return;
+        }
+
         if (document.activeElement !== cardReaderInput || !cardReaderInput.readOnly) {
             logToScreen("Kiosk WATCHDOG: Restoring focus.");
             cardReaderInput.readOnly = true;
@@ -550,6 +576,7 @@ setInterval(() => {
         }
     }
 }, 3000);
+
 
 setupLogoGestures();
 initializeKiosk();

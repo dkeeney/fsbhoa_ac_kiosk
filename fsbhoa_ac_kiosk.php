@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: FSBHOA Access Control - Kiosk Module
+ * Plugin Name: FSBHOA Access Control - Kiosk 
  * Description: Touchscreen Kiosk UI and validation service for FSBHOA amenities. Requires FSBHOA Core.
  * Version: 1.0.0
  */
@@ -12,6 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Fsbhoa_AC_Kiosk {
 
     private static $instance = null;
+    private $settings_page = null; // Store settings instance
 
     public static function get_instance() {
         if ( null === self::$instance ) {
@@ -32,6 +33,9 @@ class Fsbhoa_AC_Kiosk {
             return;
         }
 
+        // Ensure virtual kiosk controller & gates exist in the database
+        $this->ensure_virtual_kiosk_controller();
+
         $this->includes();
         $this->instantiate_classes();
     }
@@ -39,7 +43,7 @@ class Fsbhoa_AC_Kiosk {
     private function includes() {
         require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-rest-api.php';
         require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-settings.php';
-        // require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-stations.php'; // Future step
+        require_once plugin_dir_path( __FILE__ ) . 'includes/admin/class-fsbhoa-kiosk-stations-page.php';
     }
 
     private function instantiate_classes() {
@@ -47,10 +51,11 @@ class Fsbhoa_AC_Kiosk {
         $api = new Fsbhoa_Kiosk_REST_API();
         add_action( 'rest_api_init', array( $api, 'register_routes' ) );
 
-        // 2. Instantiate Settings
+        // 2. Instantiate Settings (and store reference so we don't duplicate)
         if ( is_admin() ) {
-            new Fsbhoa_Kiosk_Settings();
+            $this->settings_page = new Fsbhoa_Kiosk_Settings();
         }
+
         // 3. Inject Kiosk Service into Core's System Status page
         add_filter( 'fsbhoa_system_services', function( $services ) {
             $services['fsbhoa_kiosk'] = 'Kiosk Service';
@@ -62,23 +67,74 @@ class Fsbhoa_AC_Kiosk {
     }
 
     public function register_admin_menus() {
-        // Add Amenities under the Core's main menu slug ('fsbhoa-ac-core')
-        $amenity_page = new Fsbhoa_Amenity_Admin_Page();
+        // Adding submenu for Kiosk Settings using the stored instance
+        if ( $this->settings_page ) {
+            add_submenu_page(
+                'fsbhoa_ac_main_menu',
+                'Kiosk Settings',
+                'Kiosk Settings',
+                'manage_options',
+                'fsbhoa_kiosk_settings',
+                array( $this->settings_page, 'render_kiosk_settings_page' )
+            );
+        }
+
+        // Kiosk Stations Page under Core's main menu slug
+        $stations_page = new Fsbhoa_Kiosk_Stations_Page();
         add_submenu_page(
-            'fsbhoa-ac-core',           // Parent slug from Core
-            'Amenities',                // Page Title
-            'Amenities',                // Menu Title
-            'manage_options',           // Capability
-            'fsbhoa-ac-amenities',      // Menu Slug
-            array( $amenity_page, 'render_page' )
+            'fsbhoa_ac_main_menu',
+            'Kiosk Stations',
+            'Kiosk Stations',
+            'manage_options',
+            'fsbhoa-ac-kiosk-stations',
+            array( $stations_page, 'render_page' )
         );
     }
 
     public function core_missing_notice() {
         echo '<div class="notice notice-error"><p><strong>FSBHOA Kiosk Plugin:</strong> The FSBHOA Core plugin is missing or deactivated. The Kiosk module will not function.</p></div>';
     }
+
+    private function ensure_virtual_kiosk_controller() {
+        global $wpdb;
+
+        $controllers_table = 'ac_controllers';
+        $doors_table = 'ac_doors';
+
+        // 1. Check if the VIRTUAL_KIOSK controller already exists (matching 900000)
+        $controller_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT controller_record_id FROM {$controllers_table} WHERE type = %s LIMIT 1",
+            'VIRTUAL_KIOSK'
+        ) );
+
+        // If not, create it
+        if ( ! $controller_id ) {
+            $wpdb->insert( $controllers_table, [
+                'uhppoted_device_id' => 900000,
+                'friendly_name'      => 'Virtual Kiosk Controller',
+                'notes'              => 'Auto-seeded by Kiosk module for virtual check-ins.',
+                'type'               => 'VIRTUAL_KIOSK',
+            ] );
+            $controller_id = $wpdb->insert_id;
+        }
+
+        // 2. Ensure a default door/gate exists for this controller
+        $door_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT door_record_id FROM {$doors_table} WHERE controller_record_id = %d AND door_number_on_controller = %d LIMIT 1",
+            $controller_id,
+            1
+        ) );
+
+        if ( ! $door_id ) {
+            $wpdb->insert( $doors_table, [
+                'controller_record_id'      => $controller_id,
+                'door_number_on_controller' => 1,
+                'friendly_name'             => 'Test Kiosk',
+                'door_role'                 => 'KIOSK',
+            ] );
+        }
+    }
 }
 
 // Start the plugin
 Fsbhoa_AC_Kiosk::get_instance();
-

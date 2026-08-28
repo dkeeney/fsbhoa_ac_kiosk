@@ -6,8 +6,6 @@ class Fsbhoa_Kiosk_Settings {
     private $kiosk_config_path = '/var/lib/fsbhoa/kiosk.json';
 
     public function __construct() {
-        // Priority 20 ensures this runs after Core has registered the parent menu
-        add_action( 'admin_menu', array( $this, 'add_kiosk_admin_menu' ), 20 );
         add_action( 'admin_init', array( $this, 'settings_api_init' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_kiosk_assets' ) );
         
@@ -23,17 +21,6 @@ class Fsbhoa_Kiosk_Settings {
         add_action( 'fsbhoa_update_service_configs', array( $this, 'update_kiosk_service_config' ) );
     }
 
-    public function add_kiosk_admin_menu() {
-        // Attaches to the Core plugin's main menu slug
-        add_submenu_page(
-            'fsbhoa_ac_main_menu', 
-            'Kiosk Settings', 
-            'Kiosk', 
-            'manage_options', 
-            'fsbhoa_kiosk_settings', 
-            array( $this, 'render_kiosk_settings_page')
-        );
-    }
 
     public function settings_api_init() {
         $kiosk_option_group = 'fsbhoa_kiosk_options';
