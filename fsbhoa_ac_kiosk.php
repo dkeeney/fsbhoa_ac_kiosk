@@ -24,6 +24,8 @@ class Fsbhoa_AC_Kiosk {
     private function __construct() {
         // Wait for Core to load first
         add_action( 'plugins_loaded', array( $this, 'init_plugin' ) );
+
+        add_action( 'admin_post_fsbhoa_delete_kiosk_station', array( $this, 'handle_delete_kiosk_station' ) );
     }
 
     public function init_plugin() {
@@ -134,6 +136,50 @@ class Fsbhoa_AC_Kiosk {
             ] );
         }
     }
+
+
+    public function handle_delete_kiosk_station() {
+        global $wpdb;
+
+        $controller_id = isset( $_GET['controller_id'] ) ? absint( $_GET['controller_id'] ) : 0;
+        if ( ! $controller_id ) {
+            wp_die( 'Invalid kiosk station ID specified.', 'Error', ['back_link' => true] );
+        }
+
+        check_admin_referer( 'fsbhoa_delete_kiosk_' . $controller_id );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You do not have permission to delete this kiosk station.' );
+        }
+
+        // Verify it is indeed a virtual kiosk controller
+        $kiosk = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM ac_controllers WHERE controller_record_id = %d AND type = 'VIRTUAL_KIOSK'",
+            $controller_id
+        ) );
+
+        if ( ! $kiosk ) {
+            wp_die( 'Kiosk station not found or is not a virtual kiosk.', 'Error', ['back_link' => true] );
+        }
+
+        $wpdb->query( 'START TRANSACTION' );
+
+        // Deleting the controller will cascade-delete its associated doors in ac_doors
+        // because of the foreign key constraint ON DELETE CASCADE.
+        $deleted = $wpdb->delete( 'ac_controllers', [ 'controller_record_id' => $controller_id ], [ '%d' ] );
+
+        if ( false === $deleted ) {
+            $wpdb->query( 'ROLLBACK' );
+            wp_die( 'Database error while deleting the kiosk station. DB Error: ' . esc_html( $wpdb->last_error ), 'Error', ['back_link' => true] );
+        }
+
+        $wpdb->query( 'COMMIT' );
+
+        // Redirect back to the Kiosk Stations page with a success message
+        $redirect_url = remove_query_arg( [ 'action', 'controller_id', '_wpnonce' ], wp_get_referer() );
+        $redirect_url = add_query_arg( 'message', 'kiosk_deleted', $redirect_url );
+        wp_safe_redirect( $redirect_url );
+        exit;
+    } 
 }
 
 // Start the plugin
