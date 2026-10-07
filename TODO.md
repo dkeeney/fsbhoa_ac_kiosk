@@ -61,6 +61,7 @@
     - Keep production's plugin folder names (WordPress tracks active plugins by folder).
     - Database changes are manual `migration.sql` steps today; installing from zips works best if core applies them on a version change.
     - `~/deploy-production.sh` isn't in any repo and still calls `deploy_kiosk.sh` (it skips a missing script).
+    - Production's desktop autostart (`~/.config/autostart/fsbhoa_kiosk.desktop`) runs `/home/pi/fsbhoa_ac/start_kiosk.sh`, the old monolithic path. Point it at the kiosk plugin's `start_kiosk.sh`.
 - [ ] **12. Housekeeping**
   - [x] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.
   - [x] Whitelist option names in `ajax_save_kiosk_settings`. Each field has its own sanitizer; unknown names are logged and ignored.
@@ -93,10 +94,8 @@
 
 ## Document in CLAUDE.md
 
-- [ ] Architecture: Go service on 8080, websocket events, the `fsbhoa/v1/kiosk/*` endpoints, `kiosk.json`.
-- [ ] Station identity: stations are identified by the browser's IP address (Kiosk Stations page, `ac_doors.ip_address`), virtual controller `900000`, the `notRegistered` screen.
-- [ ] Card reader: USB keyboard input, last 8 digits, 400 ms wallet scan.
-- [ ] Kiosk machine setup: `start_kiosk.sh`, Firefox kiosk mode, restart signal file, logo gestures.
-- [ ] Admin Override: the cardholder list icon opens a WordPress dialog that records the sign-in at the "Admin Override" station (slot 0).
-- [ ] Which build/deploy script is canonical.
-- [ ] Business rules: business hours, guest limits, inactivity sign-in, who uses the browser URL.
+- [x] Done 2026-10-07: purpose and use (receptionist, board usage reports, guest rules), why amenities are a guess (gate hierarchy), architecture, stations, card reader (FisaiD M303), kiosk screen, Admin Override, kiosk machine setup, building and testing.
+
+## Ideas
+
+- [ ] Move the lobby kiosk browser to a dedicated Raspberry Pi 3B. It runs on the desktop of access.fsbhoa.com today and sometimes hangs or misbehaves (e.g. when a browser update is offered). Register the Pi's fixed IP as the lobby station.
