@@ -49,7 +49,10 @@
 - [x] **9. Inactivity timeout signs in to hardcoded `'Lobby'`** (`kiosk/web/app.js:417`), which may not exist in `ac_amenities`.
   - Done 2026-10-07: Kiosk Settings has "Inactivity Timeout (seconds)" (default 30) and "Inactivity Amenity" (a list of active amenities, or "None (do not sign in)"). `/kiosk/config` sends them to the kiosk page. An amenity that is no longer active is treated as None and logged.
   - **Deployment:** the setting starts as None, so timeouts record nothing until an amenity is chosen. To keep today's behavior, choose Lobby on production's Kiosk Settings page after deploying.
-- [ ] **10. Amenity and max-guest changes need a service restart.** The Go service fetches config only at startup.
+- [x] **10. Amenity and max-guest changes need a service restart.** The Go service fetches config only at startup.
+  - Code done 2026-10-07: the service checks `kiosk.json`'s timestamp every 10 seconds. When it changes, it re-reads the file and `/kiosk/config` and sends the new config to the open kiosk screens; no restart. Port, certificates, log file and event service URL still need a restart (logged). A failed reload keeps the last good settings.
+  - WordPress rewrites `kiosk.json` (atomically, via a temp file) when Kiosk Settings are saved and, through the new core hook `fsbhoa_core_amenities_changed`, when amenities are added, edited, deleted, reordered or turned on/off.
+  - [x] Tested on the testbed 2026-10-07: settings and amenity changes reached the kiosk screen without a restart.
 - [ ] **11. `deploy_kiosk.sh` conflicts with the symlink setup.** It rsyncs the repo onto itself, runs `chown -R www-data` on the repo, and copies `web/` to an unused location. Fix or remove; `rebuild.sh` matches reality.
 - [ ] **12. Housekeeping**
   - [x] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.

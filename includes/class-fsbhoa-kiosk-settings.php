@@ -19,6 +19,10 @@ class Fsbhoa_Kiosk_Settings {
         // THE CONNECTION HOOK: Listen to Core plugin's broadcast
         // Whenever Core saves its general settings, it fires this action.
         add_action( 'fsbhoa_update_service_configs', array( $this, 'update_kiosk_service_config' ) );
+
+        // Rewriting kiosk.json changes its timestamp, which tells the kiosk service to
+        // reload and refresh the open kiosk screens (the amenity list isn't in the file).
+        add_action( 'fsbhoa_core_amenities_changed', array( $this, 'update_kiosk_service_config' ) );
     }
 
 
@@ -243,7 +247,11 @@ class Fsbhoa_Kiosk_Settings {
         if (!is_dir(dirname($this->kiosk_config_path))) {
             mkdir(dirname($this->kiosk_config_path), 0755, true);
         }
-        file_put_contents($this->kiosk_config_path, $json_data);
+        // Write to a temporary file and rename it, so the kiosk service never reads a half-written file.
+        $tmp_path = $this->kiosk_config_path . '.tmp';
+        if (false === file_put_contents($tmp_path, $json_data) || ! rename($tmp_path, $this->kiosk_config_path)) {
+            error_log('KIOSK CONFIG: Could not write ' . $this->kiosk_config_path);
+        }
     }
 }
 

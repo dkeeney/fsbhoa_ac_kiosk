@@ -85,21 +85,51 @@ var upgrader = websocket.Upgrader{}
 var clients = make(map[*websocket.Conn]int)
 var clientsMutex = sync.Mutex{}
 
+// config and kioskConfig can be replaced while running (see watchConfigFile).
+// Read them through currentConfig() and currentKioskConfig().
+var configMutex sync.RWMutex
+
+const configFilePath = "/var/lib/fsbhoa/kiosk.json"
+
+// How often to check kiosk.json for changes. WordPress rewrites the file whenever
+// Kiosk Settings or the amenities are saved.
+const configCheckInterval = 10 * time.Second
+
+func currentConfig() Config {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return config
+}
+
+func currentKioskConfig() KioskConfig {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return kioskConfig
+}
+
 
 // --- Core Functions ---
 
-// loadConfiguration reads settings from the central config file.
+// readConfigFile reads settings from the central config file.
+func readConfigFile() (Config, error) {
+	var c Config
+	data, err := os.ReadFile(configFilePath)
+	if err != nil {
+		return c, fmt.Errorf("could not open config file: %w", err)
+	}
+	if err := json.Unmarshal(data, &c); err != nil {
+		return c, fmt.Errorf("could not parse config file: %w", err)
+	}
+	return c, nil
+}
+
+// loadConfiguration reads the config file at startup.
 func loadConfiguration() {
-	file, err := os.Open("/var/lib/fsbhoa/kiosk.json")
+	c, err := readConfigFile()
 	if err != nil {
-		log.Fatalf("FATAL: Could not open config file: %v", err)
+		log.Fatalf("FATAL: %v", err)
 	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		log.Fatalf("FATAL: Could not parse config file: %v", err)
-	}
+	config = c
         log.Printf("Kiosk service starting. Config loaded. API key present: %t", config.APIKey != "")
 }
 
@@ -116,34 +146,101 @@ func setupLogging() {
 	}
 }
 
-// fetchKioskConfig gets the kiosk UI config from the WordPress server.
-func fetchKioskConfig() {
-	url := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/config", config.WordPressAPIBaseURL)
+// fetchKioskConfig gets the kiosk UI config (amenities, logo, ...) from the WordPress server.
+func fetchKioskConfig(cfg Config) (KioskConfig, error) {
+	var kc KioskConfig
+	url := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/config", cfg.WordPressAPIBaseURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Fatalf("FATAL: Could not create request for kiosk config: %v", err)
+		return kc, fmt.Errorf("could not create request for kiosk config: %w", err)
 	}
-	req.Header.Set("X-API-KEY", config.APIKey)
-	client := &http.Client{}
+	req.Header.Set("X-API-KEY", cfg.APIKey)
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
-	if err != nil { // Check for non-nil error from the Do call
-		log.Fatalf("FATAL: Could not fetch kiosk config: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		log.Fatalf("FATAL: WordPress returned non-200 status for kiosk config: %s - %s", resp.Status, string(bodyBytes))
+	if err != nil {
+		return kc, fmt.Errorf("could not fetch kiosk config: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return kc, fmt.Errorf("WordPress returned non-200 status for kiosk config: %s - %s", resp.Status, string(bodyBytes))
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("FATAL: Could not read response body: %v", err)
+		return kc, fmt.Errorf("could not read response body: %w", err)
 	}
-	err = json.Unmarshal(body, &kioskConfig)
+	if err := json.Unmarshal(body, &kc); err != nil {
+		return kc, fmt.Errorf("could not parse kiosk config JSON: %w", err)
+	}
+	kc.MaxGuests = cfg.MaxGuests
+	log.Printf("Successfully fetched config. Logo: '%s', Amenities: %d, MaxGuest: %d, Inactivity: %ds -> '%s'", kc.LogoURL, len(kc.Amenities), kc.MaxGuests, kc.IdleTimeoutSeconds, kc.IdleAmenity)
+	return kc, nil
+}
+
+// watchConfigFile checks kiosk.json's timestamp and reloads when it changes.
+// Runs for the life of the service.
+func watchConfigFile() {
+	var lastMod time.Time
+	if info, err := os.Stat(configFilePath); err == nil {
+		lastMod = info.ModTime()
+	}
+	for range time.Tick(configCheckInterval) {
+		info, err := os.Stat(configFilePath)
+		if err != nil {
+			log.Printf("WARNING: Could not check config file: %v", err)
+			continue
+		}
+		if info.ModTime().Equal(lastMod) {
+			continue
+		}
+		// Only remember the new timestamp once the file has been read successfully,
+		// so a half-written file is retried on the next check.
+		if reloadConfiguration() {
+			lastMod = info.ModTime()
+		}
+	}
+}
+
+// reloadConfiguration re-reads kiosk.json and the WordPress kiosk config, then sends
+// the new config to every open kiosk screen. Returns false if kiosk.json couldn't be read.
+// Settings that only take effect at startup are kept, with a warning to restart.
+func reloadConfiguration() bool {
+	newCfg, err := readConfigFile()
 	if err != nil {
-		log.Fatalf("FATAL: Could not parse kiosk config JSON: %v", err)
+		log.Printf("CONFIG RELOAD: %v. Keeping current settings.", err)
+		return false
 	}
-        kioskConfig.MaxGuests = config.MaxGuests
-	log.Printf("Successfully fetched config. Logo: '%s', Amenities: %d, MaxGuest: %d, Inactivity: %ds -> '%s'", kioskConfig.LogoURL, len(kioskConfig.Amenities), kioskConfig.MaxGuests, kioskConfig.IdleTimeoutSeconds, kioskConfig.IdleAmenity)
+
+	old := currentConfig()
+	if newCfg.Port != old.Port || newCfg.SSLCertPath != old.SSLCertPath || newCfg.SSLKeyPath != old.SSLKeyPath ||
+		newCfg.LogFile != old.LogFile || newCfg.EventServiceURL != old.EventServiceURL {
+		log.Println("CONFIG RELOAD: Port, TLS certificate, log file or event service URL changed. Restart the kiosk service to apply them.")
+	}
+
+	// Apply the settings that are read on each request.
+	merged := old
+	merged.WordPressAPIBaseURL = newCfg.WordPressAPIBaseURL
+	merged.APIKey = newCfg.APIKey
+	merged.MaxGuests = newCfg.MaxGuests
+	merged.MonitorServiceURL = newCfg.MonitorServiceURL
+
+	kc, err := fetchKioskConfig(merged)
+
+	configMutex.Lock()
+	config = merged
+	if err != nil {
+		// Keep the last good amenities and display settings; the next file change retries.
+		log.Printf("CONFIG RELOAD: %v. Keeping current kiosk display settings.", err)
+		kioskConfig.MaxGuests = merged.MaxGuests
+	} else {
+		kioskConfig = kc
+	}
+	updated := kioskConfig
+	configMutex.Unlock()
+
+	log.Println("CONFIG RELOAD: Settings reloaded. Sending new config to open kiosk screens.")
+	broadcast(SocketMessage{Event: "kioskConfig", Payload: updated})
+	return true
 }
 
 // logSignInToWordPress sends the final amenity selection event to WordPress.
@@ -161,13 +258,14 @@ func logSignInToWordPress(rfid, amenity string, guests int, serial string, door 
 		log.Printf("Error marshalling JSON for sign-in: %v", err)
 		return
 	}
-	url := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/log-signin", config.WordPressAPIBaseURL)
+	cfg := currentConfig()
+	url := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/log-signin", cfg.WordPressAPIBaseURL)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Printf("Error creating request: %v", err)
 		return
 	}
-        req.Header.Set("X-API-KEY", config.APIKey)
+        req.Header.Set("X-API-KEY", cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -192,7 +290,7 @@ func notifyMonitorService(doorID int, status string) {
 
         // URL of the Monitor Service (running on the same machine)
         // If you ever split servers, this would need to be in config.json
-        targetURL := config.MonitorServiceURL
+        targetURL := currentConfig().MonitorServiceURL
         if targetURL == "" {
              targetURL = "https://127.0.0.1:8082" // Fallback
         }
@@ -255,14 +353,15 @@ func broadcast(message SocketMessage) {
 // WordPress logs a rejected card at the given station's door.
 func validateRFID(rfid string, station Station) (ValidationResponse, string, error) {
 	var vResponse ValidationResponse
-	validationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/validate-card/%s?door_number=%d", config.WordPressAPIBaseURL, url.PathEscape(rfid), station.DoorNumber)
+	cfg := currentConfig()
+	validationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/validate-card/%s?door_number=%d", cfg.WordPressAPIBaseURL, url.PathEscape(rfid), station.DoorNumber)
 	req, err := http.NewRequest("GET", validationURL, nil)
 	if err != nil {
 		log.Printf("Error creating validation request for %s: %v", rfid, err)
 		return vResponse, rfid, err
 	}
 
-	req.Header.Set("X-API-KEY", config.APIKey)
+	req.Header.Set("X-API-KEY", cfg.APIKey)
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -307,12 +406,13 @@ func clientIP(r *http.Request) string {
 // Returns found=false if no station has that address.
 func lookupStation(ip string) (Station, bool, error) {
 	var station Station
-	stationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/station?ip=%s", config.WordPressAPIBaseURL, url.QueryEscape(ip))
+	cfg := currentConfig()
+	stationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/station?ip=%s", cfg.WordPressAPIBaseURL, url.QueryEscape(ip))
 	req, err := http.NewRequest("GET", stationURL, nil)
 	if err != nil {
 		return station, false, err
 	}
-	req.Header.Set("X-API-KEY", config.APIKey)
+	req.Header.Set("X-API-KEY", cfg.APIKey)
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -370,8 +470,11 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	clientsMutex.Unlock()
 
 	// Send initial kiosk config and station identity to the newly connected client.
-	ws.WriteJSON(SocketMessage{Event: "kioskConfig", Payload: kioskConfig})
+	// Writes to a registered connection share clientsMutex with broadcast().
+	clientsMutex.Lock()
+	ws.WriteJSON(SocketMessage{Event: "kioskConfig", Payload: currentKioskConfig()})
 	ws.WriteJSON(SocketMessage{Event: "station", Payload: map[string]interface{}{"name": station.Name, "ip": ip}})
+	clientsMutex.Unlock()
 
 	// Variables to manage the wallet scan debouncing for this specific connection.
 	var walletScanTimer *time.Timer
@@ -523,8 +626,8 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 					if guests < 0 {
 						guests = 0
 					}
-					if kioskConfig.MaxGuests > 0 && guests > kioskConfig.MaxGuests {
-						guests = kioskConfig.MaxGuests
+					if maxGuests := currentKioskConfig().MaxGuests; maxGuests > 0 && guests > maxGuests {
+						guests = maxGuests
 					}
 					go logSignInToWordPress(rfid, amenity, guests, station.SerialNumber, station.DoorNumber)
 				} else {
@@ -563,12 +666,13 @@ type EventServiceMessage struct {
 // to listen for "trigger_poll" commands.
 func listenToEventService() {
 	for {
-		if config.EventServiceURL == "" {
+		eventServiceURL := currentConfig().EventServiceURL
+		if eventServiceURL == "" {
 			log.Println("WARNING: No event_service_url configured. Polling listener disabled.")
 			return
 		}
 
-                targetURL := config.EventServiceURL
+                targetURL := eventServiceURL
 		if !strings.HasSuffix(targetURL, "/ws") {
 			targetURL = fmt.Sprintf("%s/ws", strings.TrimRight(targetURL, "/"))
 		}
@@ -641,22 +745,29 @@ func main() {
         } else {
             triggerFile.Close()
         }
-	fetchKioskConfig()
+	kc, err := fetchKioskConfig(config)
+	if err != nil {
+		log.Fatalf("FATAL: %v", err)
+	}
+	kioskConfig = kc
+	// The server's port and certificates are fixed at startup (a reload doesn't change them).
+	startCfg := config
         go listenToEventService()
+        go watchConfigFile()
 
 
 	fs := http.FileServer(http.Dir("./web"))
 	http.Handle("/", fs)
         http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) { handleConnections(w, r) })
 
-        if config.SSLCertPath != "" && config.SSLKeyPath != "" {
-            log.Printf("STARTUP CHECK: Attempting to start HTTPS server with Cert='%s', Key='%s'", config.SSLCertPath, config.SSLKeyPath)
-            log.Printf("INFO: Starting kiosk HTTPS server on port %s", config.Port)
-            err := http.ListenAndServeTLS(config.Port, config.SSLCertPath, config.SSLKeyPath, nil)
+        if startCfg.SSLCertPath != "" && startCfg.SSLKeyPath != "" {
+            log.Printf("STARTUP CHECK: Attempting to start HTTPS server with Cert='%s', Key='%s'", startCfg.SSLCertPath, startCfg.SSLKeyPath)
+            log.Printf("INFO: Starting kiosk HTTPS server on port %s", startCfg.Port)
+            err := http.ListenAndServeTLS(startCfg.Port, startCfg.SSLCertPath, startCfg.SSLKeyPath, nil)
             if err != nil { log.Fatalf("FATAL: Secure server error: %v", err) }
         } else {
-            log.Printf("INFO: Starting kiosk HTTP server on port %s", config.Port)
-            err := http.ListenAndServe(config.Port, nil)
+            log.Printf("INFO: Starting kiosk HTTP server on port %s", startCfg.Port)
+            err := http.ListenAndServe(startCfg.Port, nil)
             if err != nil { log.Fatalf("FATAL: Insecure server error: %v", err) }
         }
 }
