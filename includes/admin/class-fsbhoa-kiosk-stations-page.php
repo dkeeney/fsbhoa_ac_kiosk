@@ -22,8 +22,11 @@ class Fsbhoa_Kiosk_Stations_Page {
         if ( isset( $_POST['submit_kiosk'] ) && check_admin_referer( 'fsbhoa_save_kiosk_station', 'fsbhoa_add_nonce' ) ) {
             $kiosk_name  = sanitize_text_field( $_POST['kiosk_friendly_name'] );
             $kiosk_notes = isset( $_POST['kiosk_notes'] ) ? sanitize_textarea_field( $_POST['kiosk_notes'] ) : '';
+            $ip_check    = $this->validate_station_ip( $_POST['kiosk_ip_address'] ?? '', $controller_id, 0 );
 
-            if ( $controller_id && ! empty( $kiosk_name ) ) {
+            if ( is_wp_error( $ip_check ) ) {
+                echo '<div class="error"><p>' . esc_html( $ip_check->get_error_message() ) . '</p></div>';
+            } elseif ( $controller_id && ! empty( $kiosk_name ) ) {
                 $max_door_num = $wpdb->get_var( $wpdb->prepare(
                     "SELECT MAX(door_number_on_controller) FROM ac_doors WHERE controller_record_id = %d",
                     $controller_id
@@ -36,6 +39,7 @@ class Fsbhoa_Kiosk_Stations_Page {
                     'friendly_name'             => $kiosk_name,
                     'door_role'                 => 'KIOSK',
                     'notes'                     => $kiosk_notes,
+                    'ip_address'                => $ip_check,
                 ] );
 
                 if ( false !== $inserted ) {
@@ -52,12 +56,16 @@ class Fsbhoa_Kiosk_Stations_Page {
             $station_id  = absint( $_POST['station_id'] );
             $kiosk_name  = sanitize_text_field( $_POST['kiosk_friendly_name'] );
             $kiosk_notes = isset( $_POST['kiosk_notes'] ) ? sanitize_textarea_field( $_POST['kiosk_notes'] ) : '';
+            $ip_check    = $this->validate_station_ip( $_POST['kiosk_ip_address'] ?? '', $controller_id, $station_id );
 
-            if ( $station_id && ! empty( $kiosk_name ) ) {
+            if ( is_wp_error( $ip_check ) ) {
+                echo '<div class="error"><p>' . esc_html( $ip_check->get_error_message() ) . '</p></div>';
+            } elseif ( $station_id && ! empty( $kiosk_name ) ) {
                 $updated = $wpdb->update( 'ac_doors', [
                     'friendly_name' => $kiosk_name,
                     'notes'         => $kiosk_notes,
-                ], [ 'door_record_id' => $station_id, 'controller_record_id' => $controller_id ], [ '%s', '%s' ], [ '%d', '%d' ] );
+                    'ip_address'    => $ip_check,
+                ], [ 'door_record_id' => $station_id, 'controller_record_id' => $controller_id ], [ '%s', '%s', '%s' ], [ '%d', '%d' ] );
 
                 if ( false !== $updated ) {
                     echo '<div class="updated"><p>Kiosk station updated successfully.</p></div>';
@@ -131,6 +139,17 @@ class Fsbhoa_Kiosk_Stations_Page {
                                 </td>
                             </tr>
                             <tr>
+                                <th scope="row"><label for="kiosk_ip_address">IP Address</label></th>
+                                <td>
+                                    <?php if ( (int) $station->door_number_on_controller === Fsbhoa_Kiosk_Admin_Override::STATION_DOOR_NUMBER ) : ?>
+                                        <p class="description">Not used. This station records staff sign-ins from the cardholder list; no kiosk browser connects as it.</p>
+                                    <?php else : ?>
+                                        <input type="text" name="kiosk_ip_address" id="kiosk_ip_address" class="regular-text" value="<?php echo esc_attr( $station->ip_address ?? '' ); ?>" placeholder="e.g., 192.168.42.50">
+                                        <p class="description">The address of the computer running this kiosk's browser. Only a browser at this address can use the kiosk as this station. Give it a fixed address (static IP or DHCP reservation). Leave blank to disable the station.</p>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <tr>
                                 <th scope="row"><label for="kiosk_notes">Notes</label></th>
                                 <td><input type="text" name="kiosk_notes" id="kiosk_notes" class="regular-text" value="<?php echo esc_attr( $station->notes ); ?>"></td>
                             </tr>
@@ -162,13 +181,14 @@ class Fsbhoa_Kiosk_Stations_Page {
                         <th class="manage-column" style="width: 80px;">Actions</th>
                         <th>Station Name</th>
                         <th>Door / Slot Number</th>
+                        <th>IP Address</th>
                         <th>Role</th>
                         <th>Notes</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ( empty( $stations ) ) : ?>
-                        <tr><td colspan="5">No kiosk stations configured yet.</td></tr>
+                        <tr><td colspan="6">No kiosk stations configured yet.</td></tr>
                     <?php else : ?>
                         <?php foreach ( $stations as $station ) : 
                             $delete_nonce = wp_create_nonce( 'fsbhoa_delete_station_' . $station->door_record_id );
@@ -195,6 +215,7 @@ class Fsbhoa_Kiosk_Stations_Page {
                                 </td>
                                 <td><strong><?php echo esc_html( $station->friendly_name ); ?></strong></td>
                                 <td><?php echo esc_html( $station->door_number_on_controller ); ?></td>
+                                <td><?php echo $station->ip_address ? esc_html( $station->ip_address ) : '<em>None (cannot connect)</em>'; ?></td>
                                 <td><?php echo esc_html( $station->door_role ); ?></td>
                                 <td><?php echo esc_html( $station->notes ?? '' ); ?></td>
                             </tr>
@@ -212,6 +233,13 @@ class Fsbhoa_Kiosk_Stations_Page {
                         <td><input type="text" name="kiosk_friendly_name" id="kiosk_friendly_name" class="regular-text" placeholder="e.g., Pool Kiosk" required></td>
                     </tr>
                     <tr>
+                        <th scope="row"><label for="kiosk_ip_address">IP Address</label></th>
+                        <td>
+                            <input type="text" name="kiosk_ip_address" id="kiosk_ip_address" class="regular-text" placeholder="e.g., 192.168.42.50">
+                            <p class="description">The address of the computer running this kiosk's browser. Only a browser at this address can use the kiosk as this station. Give it a fixed address (static IP or DHCP reservation).</p>
+                        </td>
+                    </tr>
+                    <tr>
                         <th scope="row"><label for="kiosk_notes">Notes</label></th>
                         <td><input type="text" name="kiosk_notes" id="kiosk_notes" class="regular-text" placeholder="e.g., Located at the main clubhouse entrance"></td>
                     </tr>
@@ -223,5 +251,44 @@ class Fsbhoa_Kiosk_Stations_Page {
         </div>
         <?php
     }
-}
 
+    /**
+     * Validates a station IP address from the form.
+     * Blank means "no address" (the station cannot connect). IPv4-mapped IPv6 addresses
+     * (::ffff:192.168.1.5) are stored as plain IPv4, matching how the kiosk service reports them.
+     *
+     * @param string $raw            The submitted value.
+     * @param int    $controller_id  The kiosk virtual controller.
+     * @param int    $station_id     The station being edited (0 when adding).
+     * @return string|null|WP_Error  Normalized address, null for blank, or an error.
+     */
+    private function validate_station_ip( $raw, $controller_id, $station_id ) {
+        global $wpdb;
+
+        $ip = trim( sanitize_text_field( wp_unslash( $raw ) ) );
+        if ( $ip === '' ) {
+            return null;
+        }
+
+        $packed = @inet_pton( $ip );
+        if ( false === $packed || ! filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+            return new WP_Error( 'invalid_ip', 'Not a valid IP address: ' . $ip );
+        }
+        if ( strlen( $packed ) === 16 && substr( $packed, 0, 12 ) === str_repeat( "\0", 10 ) . "\xff\xff" ) {
+            $packed = substr( $packed, 12 );
+        }
+        $ip = inet_ntop( $packed );
+
+        $in_use_by = $wpdb->get_var( $wpdb->prepare(
+            "SELECT friendly_name FROM ac_doors WHERE controller_record_id = %d AND ip_address = %s AND door_record_id != %d LIMIT 1",
+            $controller_id,
+            $ip,
+            $station_id
+        ) );
+        if ( $in_use_by ) {
+            return new WP_Error( 'duplicate_ip', sprintf( 'IP address %s is already used by station "%s".', $ip, $in_use_by ) );
+        }
+
+        return $ip;
+    }
+}

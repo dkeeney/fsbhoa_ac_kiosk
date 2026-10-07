@@ -7,7 +7,9 @@ import (
     "fmt"
     "io"
     "log"
+    "net"
     "net/http"
+    "net/url"
     "os"
     "strings"
     "sync"
@@ -55,6 +57,18 @@ type SignInPayload struct {
 }
 
 
+// Station is the kiosk station registered in WordPress for a browser's IP address.
+type Station struct {
+	DoorRecordID int    `json:"door_record_id"`
+	Name         string `json:"name"`
+	SerialNumber string `json:"serial_number"`
+	DoorNumber   int    `json:"door_number"`
+}
+
+// Limits on card lookups per connection, so card numbers can't be guessed in bulk.
+const maxRFIDsPerScan = 5
+const maxLookupsPerMinute = 10
+
 type ValidationResponse struct {
 	IsValid    bool        `json:"isValid"`
 	Message    string      `json:"message"`
@@ -64,7 +78,8 @@ type ValidationResponse struct {
 // --- Global variables ---
 var config Config
 var kioskConfig KioskConfig
-var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+// The default origin check only accepts pages served by this service.
+var upgrader = websocket.Upgrader{}
 var clients = make(map[*websocket.Conn]int)
 var clientsMutex = sync.Mutex{}
 
@@ -268,41 +283,101 @@ func validateRFID(rfid string) (ValidationResponse, string, error) {
 }
 
 
-// handleConnections is the WebSocket handler for browser UI communication.
-func handleConnections(w http.ResponseWriter, r *http.Request) {
-        // Parse Door ID from the connection URL
-	// The frontend will connect to: ws://host/ws?doorId=33
-	doorIDStr := r.URL.Query().Get("doorId")
-	doorID := 0
-	if doorIDStr != "" {
-		fmt.Sscanf(doorIDStr, "%d", &doorID)
+// clientIP returns the connection's source address, with IPv4-mapped IPv6
+// addresses (::ffff:192.168.1.5) converted to plain IPv4.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.String()
+}
 
-	log.Println("==> Received a request to upgrade to WebSocket")
+// lookupStation asks WordPress which kiosk station is registered for an IP address.
+// Returns found=false if no station has that address.
+func lookupStation(ip string) (Station, bool, error) {
+	var station Station
+	stationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/station?ip=%s", config.WordPressAPIBaseURL, url.QueryEscape(ip))
+	req, err := http.NewRequest("GET", stationURL, nil)
+	if err != nil {
+		return station, false, err
+	}
+	req.Header.Set("X-API-KEY", config.APIKey)
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return station, false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return station, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return station, false, fmt.Errorf("bad status: %s - %s", resp.Status, string(bodyBytes))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&station); err != nil {
+		return station, false, err
+	}
+	return station, true, nil
+}
+
+// handleConnections is the WebSocket handler for browser UI communication.
+// The station is decided by the connection's source IP address, never by the browser.
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+
+	log.Printf("==> Received a request to upgrade to WebSocket from %s", ip)
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ERROR: Failed to upgrade WebSocket connection: %v", err)
 		return
 	}
-        //  Notify Monitor: "Kiosk is Online"
-	// We treat "Connected" as "Intermediate" (Yellow/Controlled) status
-	if doorID > 0 {
-		log.Printf("Kiosk client connected for Door %d. Notifying Monitor Service.", doorID)
-		notifyMonitorService(doorID, "intermediate")
+
+	station, found, err := lookupStation(ip)
+	if err != nil {
+		log.Printf("ERROR: Station lookup failed for %s: %v", ip, err)
+		ws.WriteJSON(SocketMessage{Event: "stationError", Payload: map[string]interface{}{"ip": ip}})
+		ws.Close()
+		return
 	}
+	if !found {
+		log.Printf("SECURITY: Refused kiosk connection from unregistered address %s", ip)
+		ws.WriteJSON(SocketMessage{Event: "notRegistered", Payload: map[string]interface{}{"ip": ip}})
+		ws.Close()
+		return
+	}
+	doorID := station.DoorRecordID
+
+	//  Notify Monitor: "Kiosk is Online"
+	// We treat "Connected" as "Intermediate" (Yellow/Controlled) status
+	log.Printf("Kiosk client connected from %s as station '%s' (Door %d). Notifying Monitor Service.", ip, station.Name, doorID)
+	notifyMonitorService(doorID, "intermediate")
 
 	clientsMutex.Lock()
 	clients[ws] = doorID
 	clientsMutex.Unlock()
-        log.Printf("Client Connected. Received DoorID param: '%s'", doorIDStr)
 
-	// Send initial kiosk config to the newly connected client.
+	// Send initial kiosk config and station identity to the newly connected client.
 	ws.WriteJSON(SocketMessage{Event: "kioskConfig", Payload: kioskConfig})
+	ws.WriteJSON(SocketMessage{Event: "station", Payload: map[string]interface{}{"name": station.Name, "ip": ip}})
 
 	// Variables to manage the wallet scan debouncing for this specific connection.
 	var walletScanTimer *time.Timer
 	var scannedRFIDs []string
-	var rfidMutex sync.Mutex // Protects access to the scannedRFIDs slice
+	var rfidMutex sync.Mutex // Protects scannedRFIDs, sessionRFID and lookupTimes
+	// The card validated by the last swipe. Sign-ins are logged for this card only,
+	// whatever card number the browser sends.
+	var sessionRFID string
+	var lookupTimes []time.Time
 
 	// This is the function that will be called when the wallet scan timer fires.
 	processWalletScan := func() {
@@ -317,7 +392,39 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		scannedRFIDs = []string{} // Clear the slice for the next scan
+		sessionRFID = ""          // A new swipe replaces any earlier one
+
+		if len(finalRFIDs) > maxRFIDsPerScan {
+			finalRFIDs = finalRFIDs[:maxRFIDsPerScan]
+		}
+
+		// Rate limit: drop lookups older than a minute, then check the budget.
+		now := time.Now()
+		recent := lookupTimes[:0]
+		for _, t := range lookupTimes {
+			if now.Sub(t) < time.Minute {
+				recent = append(recent, t)
+			}
+		}
+		lookupTimes = recent
+		rateLimited := len(lookupTimes)+len(finalRFIDs) > maxLookupsPerMinute
+		if !rateLimited {
+			for range finalRFIDs {
+				lookupTimes = append(lookupTimes, now)
+			}
+		}
 		rfidMutex.Unlock()
+
+		if rateLimited {
+			log.Printf("SECURITY: Rate limit hit for station '%s' (%s). Ignoring %d card(s).", station.Name, ip, len(finalRFIDs))
+			clientsMutex.Lock()
+			ws.WriteJSON(SocketMessage{Event: "cardSwiped", Payload: map[string]interface{}{
+				"isValid": false,
+				"message": "Too many attempts. Please wait a minute and try again.",
+			}})
+			clientsMutex.Unlock()
+			return
+		}
 
 		log.Printf("Wallet scan complete. Found %d unique RFIDs to check.", len(finalRFIDs))
 
@@ -339,6 +446,10 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 		var finalMessage SocketMessage
 		if foundValid {
+			rfidMutex.Lock()
+			sessionRFID = validRFID
+			rfidMutex.Unlock()
+
 			// Construct the success payload
 			finalPayload := map[string]interface{}{
 				"isValid":    validCardResponse.IsValid,
@@ -373,59 +484,50 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			delete(clients, ws)
 			clientsMutex.Unlock()
 
-                        //  Notify Monitor: "Kiosk is Offline"
+			//  Notify Monitor: "Kiosk is Offline"
 			// We treat "Disconnected" as "Down" (Black) status
-			if doorID > 0 {
-				log.Printf("Kiosk client disconnected for Door %d. Notifying Monitor Service.", doorID)
-				notifyMonitorService(doorID, "down")
-			}
+			log.Printf("Kiosk client disconnected for Door %d. Notifying Monitor Service.", doorID)
+			notifyMonitorService(doorID, "down")
 
 			// Stop any pending timer when client disconnects
+			rfidMutex.Lock()
 			if walletScanTimer != nil {
 				walletScanTimer.Stop()
 			}
+			rfidMutex.Unlock()
 			break // Exit the read loop
 		}
 
 		log.Printf("GO DEBUG 1: Received WebSocket message with event type: %s", msg.Event)
 
 		switch msg.Event {
-                case "amenitySelected":
-                        log.Println("GO DEBUG 2: Entered 'amenitySelected' case.")
-                        if payload, ok := msg.Payload.(map[string]interface{}); ok {
-                                // 1. Extract standard fields with safety checks
-                                rfid, okR := payload["rfid"].(string)
-                                amenity, okA := payload["amenity"].(string)
-                                guestsFloat, okG := payload["guests"].(float64)
+		case "amenitySelected":
+			log.Println("GO DEBUG 2: Entered 'amenitySelected' case.")
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				amenity, okA := payload["amenity"].(string)
+				guestsFloat, okG := payload["guests"].(float64)
 
-                                // 2. Extract new Identity fields (Optional - default if missing)
-                                // We don't fail if these are missing, we just default to "0" to handle legacy clients.
-                                
-                                var serialStr string = "0"
-                                if serialRaw, exists := payload["serial_number"]; exists {
-                                    // JSON numbers come as float64, strings as string. Handle both.
-                                    if s, ok := serialRaw.(string); ok {
-                                        serialStr = s
-                                    } else if f, ok := serialRaw.(float64); ok {
-                                        serialStr = fmt.Sprintf("%.0f", f)
-                                    }
-                                }
+				// Use the card this connection validated, and use it only once.
+				rfidMutex.Lock()
+				rfid := sessionRFID
+				sessionRFID = ""
+				rfidMutex.Unlock()
 
-                                var doorInt int = 0
-                                if doorRaw, exists := payload["door_number"]; exists {
-                                     if f, ok := doorRaw.(float64); ok {
-                                         doorInt = int(f)
-                                     }
-                                }
-
-                                // 3. Execute only if core data is valid
-                                if okR && okA && okG {
-                                        guests := int(guestsFloat)
-                                        go logSignInToWordPress(rfid, amenity, guests, serialStr, doorInt)
-                                } else {
-                                        log.Printf("ERROR: Missing required fields in amenitySelected. R=%v A=%v G=%v", okR, okA, okG)
-                                }
-                        }
+				if rfid == "" {
+					log.Printf("SECURITY: amenitySelected from station '%s' with no validated swipe. Ignored.", station.Name)
+				} else if okA && okG && amenity != "" {
+					guests := int(guestsFloat)
+					if guests < 0 {
+						guests = 0
+					}
+					if kioskConfig.MaxGuests > 0 && guests > kioskConfig.MaxGuests {
+						guests = kioskConfig.MaxGuests
+					}
+					go logSignInToWordPress(rfid, amenity, guests, station.SerialNumber, station.DoorNumber)
+				} else {
+					log.Printf("ERROR: Missing required fields in amenitySelected. A=%v G=%v", okA, okG)
+				}
+			}
 
 		case "manualSwipe":
 			if payload, ok := msg.Payload.(map[string]interface{}); ok {
@@ -436,7 +538,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 					if walletScanTimer != nil {
 						walletScanTimer.Stop()
 					}
-					// Start a new 250ms timer. If another swipe comes in, this will be
+					// Start a new 400ms timer. If another swipe comes in, this will be
 					// stopped and reset. If not, processWalletScan will run.
 					walletScanTimer = time.AfterFunc(400*time.Millisecond, processWalletScan)
 					rfidMutex.Unlock()
@@ -445,65 +547,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-// apiProxyHandler  acts as a bridge between the Kiosk JS and the WordPress API.
-// Allowed paths that the frontend is permitted to request via the proxy.
-// This prevents the frontend from accessing sensitive WP endpoints (like /users).
-var allowedProxyPaths = map[string]bool{
-    "/fsbhoa/v1/monitor/gates": true,
-    // Add future paths here, e.g.:
-    // "/fsbhoa/v1/amenities/status": true,
-}
-
-func apiProxyHandler(w http.ResponseWriter, r *http.Request) {
-    // 1. Get the requested path from the query string (e.g. ?endpoint=/fsbhoa/v1/monitor/gates)
-    endpoint := r.URL.Query().Get("endpoint")
-    
-    // 2. SECURITY CHECK: Is this path allowed?
-    // We strip query parameters from the map check (e.g. "?role=KIOSK")
-    // This is a simple check; for production, you might need more robust parsing.
-    basePath := endpoint
-    if idx := strings.Index(endpoint, "?"); idx != -1 {
-        basePath = endpoint[:idx]
-    }
-
-    if !allowedProxyPaths[basePath] {
-        log.Printf("SECURITY: Blocked proxy attempt to unauthorized path: %s", endpoint)
-        http.Error(w, "Forbidden", http.StatusForbidden)
-        return
-    }
-
-    // 3. Construct the full URL
-    // We pass the raw 'endpoint' string which includes the query params from the frontend
-    targetURL := fmt.Sprintf("%s/wp-json%s", config.WordPressAPIBaseURL, endpoint)
-
-    // 4. Create Request
-    req, err := http.NewRequest("GET", targetURL, nil)
-    if err != nil {
-        log.Printf("PROXY ERROR: Could not create request: %v", err)
-        http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-        return
-    }
-
-    req.Header.Set("X-API-KEY", config.APIKey)
-
-    // 5. Send Request
-    client := &http.Client{Timeout: 5 * time.Second}
-    resp, err := client.Do(req)
-    if err != nil {
-        log.Printf("PROXY ERROR: Backend unreachable: %v", err)
-        http.Error(w, "Bad Gateway", http.StatusBadGateway)
-        return
-    }
-    defer resp.Body.Close()
-
-    // 6. Forward Response
-    w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-    w.WriteHeader(resp.StatusCode)
-    io.Copy(w, resp.Body)
-}
-
-
 
 // ---  Event Service Listener ---
 
@@ -600,7 +643,6 @@ func main() {
 
 
 	fs := http.FileServer(http.Dir("./web"))
-        http.HandleFunc("/api/proxy", apiProxyHandler)
 	http.Handle("/", fs)
         http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) { handleConnections(w, r) })
 

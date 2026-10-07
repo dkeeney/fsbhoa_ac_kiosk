@@ -2,12 +2,24 @@
 
 ## Problems
 
-- [ ] **1. Open websocket on port 8080 (security).** No auth and `CheckOrigin` accepts any site (`kiosk/main.go:67`). Any browser that reaches 8080 can send `manualSwipe` to look up names and photos, or `amenitySelected` to log fake sign-ins. `log_signin_callback` records `access_granted = 1` without re-checking the card.
+- [x] **1. Open websocket on port 8080 (security).** No auth and `CheckOrigin` accepts any site (`kiosk/main.go:67`). Any browser that reaches 8080 can send `manualSwipe` to look up names and photos, or `amenitySelected` to log fake sign-ins. `log_signin_callback` records `access_granted = 1` without re-checking the card.
   - **Decision (2026-10-07): identify stations by IP address.** Add an IP field to each station on the Kiosk Stations page. The Go service looks up the station from the connection's source address (`r.RemoteAddr`, converting `::ffff:` IPv4-mapped addresses to plain IPv4) and refuses unknown addresses. This replaces the setup screen and `?auto_name=`.
   - Also: remember the validated card per connection and log that card, not the one the browser sends. Re-check the card in WordPress before logging. Rate-limit swipes per connection.
   - Each station needs a fixed address (static IP or DHCP reservation). Browsers must connect directly, with no proxy or NAT in between.
   - Home testing works over the pfSense VPN: routed, per-user addresses (e.g. `192.168.70.3`). Add home test stations on the testbed only.
   - A pairing token could be added later if IP addresses aren't enough.
+  - Done 2026-10-07:
+    - [x] Core: `ip_address` column on `ac_doors` (`class-fsbhoa-core-repository.php`, `db_schema.sql`, `migration.sql` STEP 6). Applied to the testbed database.
+    - [x] WordPress: `GET /kiosk/station?ip=` returns the station registered for an address. `log-signin` re-checks the card and logs a rejected sign-in as denied. The shared card check treats a missing expiration date as "never expires" (fixes #6 for the kiosk).
+    - [x] Kiosk Stations page: IP address field on add and edit (validated, normalized, unique), shown in the list. Not offered for the Admin Override station.
+    - [x] Go service: looks up the station from the connection's source IP and refuses unregistered addresses with a `notRegistered` message. Remembers the validated card per connection and logs only that card, once. Caps a scan at 5 cards and 10 lookups per minute per connection. Uses the default same-origin websocket check. Removed `/api/proxy`.
+    - [x] Kiosk page: removed the setup screen, `?auto_name=`, `?reset_kiosk` and the stored identity. Shows a "not registered" message with the device's IP and checks again every 30 seconds.
+    - [x] `start_kiosk.sh`: no longer passes `?auto_name=LobbyKiosk`.
+    - [x] Installed on the testbed and tested. Home PC over VPN (192.168.70.3, station TestbedKiosk) swiped and signed in to Cafe; shown on the monitor and in the access log. An unregistered address (127.0.0.1) gets `notRegistered`; a websocket from another site's page is refused (HTTP 403).
+    - [ ] Not yet tested: the per-connection rate limit, and a kiosk browser running on the testbed machine itself (no monitor attached to the testbed Pi yet).
+  - **Deployment order for production:** run the `migration.sql` STEP 6 column change and register the lobby kiosk's IP on the Kiosk Stations page *before* installing the new kiosk service, or the lobby kiosk will be refused.
+  - On the testbed, `testbed.fsbhoa.com` resolves to `127.0.0.1` (`/etc/hosts`), so a kiosk browser on the testbed machine itself connects from `127.0.0.1`. Check what address the production kiosk browser connects from before registering it (`ss -tn state established '( sport = :8080 )'`).
+  - A testbed refresh copies `ac_doors` from production, which replaces the testbed's station IPs. Re-register testbed stations (e.g. the home PC) after a refresh.
 - [x] **2. Direct load always fails.** `get_cardholder_by_id_callback` reads `cred.card_expiry_date`, which core's migration renamed to `expiration_date` (`includes/class-fsbhoa-kiosk-rest-api.php:267`).
   - Direct load is the cardholder list's "Sign-in at Kiosk" icon, an admin override for signing in a cardholder without a swipe. It opens `kiosk_url/?cardholder_id=N&door_number=255` in a new tab (`fsbhoa_ac_core/assets/js/fsbhoa-cardholder-admin.js:359`). With IP-based stations (#1) that tab would be refused.
   - **Decision (2026-10-07): move the override into WordPress.**
@@ -19,11 +31,12 @@
     - Code done 2026-10-07 (`includes/class-fsbhoa-kiosk-admin-override.php`, `assets/js/fsbhoa-kiosk-admin-override.js`, `assets/css/fsbhoa-kiosk-admin-override.css`). The station is slot 0 on the virtual controller, created on first use.
     - [x] Test the dialog in the browser on the testbed. Passed 2026-10-07: logged as `900000` slot 0, "Amenity: Library"; shown on the monitor and in the access log.
     - [x] Install the rebuilt Go service (`./rebuild.sh install`). Done 2026-10-07.
-    - [ ] Follow-up: the Admin Override station has `door_role = 'KIOSK'`, so it appears in the kiosk setup screen's gate list until #1 replaces that screen. Usage analytics also label every `900000` event as "Lobby Kiosk" (see #13).
+    - [x] Follow-up: the Admin Override station appeared in the kiosk setup screen's gate list. Gone with #1 (setup screen removed; slot 0 has no IP so no browser can connect as it).
+    - [ ] Follow-up: usage analytics label every `900000` event as "Lobby Kiosk" (see #13).
 - [x] **3. Kiosk hangs when direct load fails.** _Goes away with #2._ The `startSessionById` error branch builds a failure message but never sends it (`kiosk/main.go:466`).
 - [ ] **4. Testbed can point at production.** `update_kiosk_service_config` falls back to `access.fsbhoa.com` when `fsbhoa_ac_wp_host` is missing. Should fail closed per `ARCHITECTURE.md`.
 - [ ] **5. API key written to the log** at startup (`kiosk/main.go:86`).
-- [ ] **6. No expiration date counts as expired.** `strtotime(null) < time()` is true; `expiration_date` can be `NULL`.
+- [x] **6. No expiration date counts as expired.** _Fixed in #1 (shared `check_card`) and in the Admin Override._ `strtotime(null) < time()` is true; `expiration_date` can be `NULL`.
 - [x] **7. Direct-load sign-ins use serial `"000000"`** instead of the virtual controller `900000` (`kiosk/web/app.js:96`). _Goes away with #2._
 - [ ] **8. Failed swipes logged inconsistently.** Written directly to `ac_access_log` as controller `'kiosk'`, door 0, bypassing `Fsbhoa_Access_Service`.
 - [ ] **9. Inactivity timeout signs in to hardcoded `'Lobby'`** (`kiosk/web/app.js:417`), which may not exist in `ac_amenities`.
@@ -45,13 +58,13 @@
   - [x] The Kiosk Stations list shows every door on any `VIRTUAL_KIOSK` controller, so the QR court gates appear as kiosk stations and can be edited or deleted there.
   - [x] `handle_delete_kiosk_station` deletes any `VIRTUAL_KIOSK` controller (and cascades its doors), including `900001`.
   - [x] Share one serial constant across the plugin instead of repeating `900000`.
-  - Done 2026-10-07. `Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL` is used by the controller seeding, the Stations page, the Admin Override and the REST default. The Stations page's add, edit, delete and list now only touch doors on that controller. `handle_delete_kiosk_station` was unused and has been removed. The `'900000'` fallbacks in `kiosk/web/app.js` remain until #1 replaces the station identity code.
+  - Done 2026-10-07. `Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL` is used by the controller seeding, the Stations page, the Admin Override and the REST default. The Stations page's add, edit, delete and list now only touch doors on that controller. `handle_delete_kiosk_station` was unused and has been removed. The `'900000'` fallbacks in `kiosk/web/app.js` were removed with #1 (the Go service now supplies the station).
 - [ ] **15. (Low priority) Check how `fsbhoa_light` manages QR code stations.** When it adds or deletes a QR station, make sure the station is created or removed as a door on its virtual controller (`900001`), so QR scans are logged as access control events like any other gate. Work is in `/home/pi/fsbhoa_light` (e.g. `lighting-service/remote_client.go`, `includes/admin-settings.php`).
 
 ## Document in CLAUDE.md
 
 - [ ] Architecture: Go service on 8080, websocket events, the `fsbhoa/v1/kiosk/*` endpoints, `kiosk.json`.
-- [ ] Station identity: `?auto_name=`, setup screen and localStorage, `?reset_kiosk`, the Kiosk Stations page and virtual controller `900000`.
+- [ ] Station identity: stations are identified by the browser's IP address (Kiosk Stations page, `ac_doors.ip_address`), virtual controller `900000`, the `notRegistered` screen.
 - [ ] Card reader: USB keyboard input, last 8 digits, 400 ms wallet scan.
 - [ ] Kiosk machine setup: `start_kiosk.sh`, Firefox kiosk mode, restart signal file, logo gestures.
 - [ ] Admin Override: the cardholder list icon opens a WordPress dialog that records the sign-in at the "Admin Override" station (slot 0).

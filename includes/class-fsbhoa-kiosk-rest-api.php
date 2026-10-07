@@ -28,6 +28,12 @@ class Fsbhoa_Kiosk_REST_API {
             'callback'            => array( $this, 'validate_card_callback' ),
             'permission_callback' => array( $this, 'api_key_permission_check' ),
         ) );
+
+        register_rest_route( $this->namespace, '/kiosk/station', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_station_callback' ),
+            'permission_callback' => array( $this, 'api_key_permission_check' ),
+        ) );
     }
     /**
      * Security check for the Kiosk API endpoint.
@@ -71,6 +77,42 @@ class Fsbhoa_Kiosk_REST_API {
     }
 
     /**
+     * Looks up the kiosk station registered for a browser's IP address.
+     * The kiosk service calls this when a browser connects, so the station is decided
+     * by where the connection comes from, not by anything the browser claims.
+     */
+    public function get_station_callback( WP_REST_Request $request ) {
+        global $wpdb;
+
+        $ip = trim( (string) $request->get_param( 'ip' ) );
+        if ( ! filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+            return new WP_Error( 'bad_request', 'A valid ip parameter is required.', ['status' => 400] );
+        }
+
+        $station = $wpdb->get_row( $wpdb->prepare(
+            "SELECT d.door_record_id, d.friendly_name, d.door_number_on_controller, c.uhppoted_device_id
+             FROM ac_doors d JOIN ac_controllers c ON d.controller_record_id = c.controller_record_id
+             WHERE c.type = 'VIRTUAL_KIOSK' AND c.uhppoted_device_id = %d
+               AND d.door_role = 'KIOSK' AND d.ip_address = %s
+             LIMIT 1",
+            Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL,
+            $ip
+        ) );
+        if ( $wpdb->last_error ) { return new WP_Error( 'db_error', 'Database error looking up station.', ['status' => 500] ); }
+
+        if ( ! $station ) {
+            return new WP_Error( 'not_registered', 'No kiosk station is registered for this address.', ['status' => 404] );
+        }
+
+        return new WP_REST_Response( [
+            'door_record_id' => (int) $station->door_record_id,
+            'name'           => $station->friendly_name,
+            'serial_number'  => (string) $station->uhppoted_device_id,
+            'door_number'    => (int) $station->door_number_on_controller,
+        ], 200 );
+    }
+
+    /**
      * This is called when kiosk has collected an amenity for a valid cardholder.
      * UPDATED: Delegates all processing to Fsbhoa_Access_Service::process_and_write_event.
      */
@@ -94,6 +136,12 @@ class Fsbhoa_Kiosk_REST_API {
             return new WP_Error( 'bad_request', 'Missing rfid or amenity name.', ['status' => 400] );
         }
 
+        // Re-check the card here rather than trusting the earlier swipe validation.
+        $card = $this->check_card( $rfid );
+        if ( is_wp_error( $card ) ) {
+            return new WP_REST_Response( ['status' => 'failure', 'message' => 'System error validating card.'], 500 );
+        }
+
         // Prepare the standardized log data array
         // We do NOT need to look up cardholder_id here; the service does it.
         $log_data = [
@@ -107,6 +155,17 @@ class Fsbhoa_Kiosk_REST_API {
             'amenity_name'          => $amenity_name,
             // We pass the amenity name, and the Service will handle the description logic based on the 'KIOSK' role
         ];
+
+        // A rejected sign-in is still logged (as denied) so there is an audit trail.
+        if ( ! $card['is_valid'] ) {
+            $log_data['event_type_code']   = 101; // Failure
+            $log_data['access_granted']    = 0;
+            $log_data['event_description'] = 'Kiosk sign-in rejected: ' . $card['message'];
+            unset( $log_data['amenity_name'] );
+            $log_data['guest_count'] = 0;
+            Fsbhoa_Access_Service::process_and_write_event( $log_data );
+            return new WP_REST_Response( ['status' => 'failure', 'message' => $card['message']], 403 );
+        }
 
         // --- HAND OFF TO CENTRAL SERVICE ---
         $result = Fsbhoa_Access_Service::process_and_write_event( $log_data );
@@ -134,8 +193,42 @@ class Fsbhoa_Kiosk_REST_API {
      * The card id should be checked against the database and confirm this cardholder is valid.
      */
     public function validate_card_callback( WP_REST_Request $request ) {
-        global $wpdb;
         $rfid = sanitize_text_field($request['rfid']);
+
+        $card = $this->check_card( $rfid );
+        if ( is_wp_error( $card ) ) { return $card; }
+
+        $is_valid   = $card['is_valid'];
+        $message    = $card['message'];
+        $cardholder = $card['cardholder'];
+
+        if ($is_valid) {
+            // If the card is valid, send the cardholder data to the kiosk UI
+            $cardholder_data = [
+                'name'  => trim($cardholder->first_name . ' ' . $cardholder->last_name),
+                'photo' => !empty($cardholder->photo) ? base64_encode($cardholder->photo) : null,
+            ];
+            $response = ['isValid' => true, 'message' => $message, 'cardholder' => $cardholder_data];
+        } else {
+            // If the card is NOT valid, log the failure and notify the monitor
+            $log_id = $this->_log_kiosk_event($rfid, 'Kiosk Validation: ' . $message, false);
+            if ($log_id > 0) {
+                 $this->send_notification_to_monitor($log_id);
+            }
+            $response = ['isValid' => false, 'message' => $message];
+        }
+
+        return new WP_REST_Response($response, 200);
+    }
+
+    /**
+     * Checks that a badge is active, belongs to an active cardholder, and has not expired.
+     * A badge with no expiration date never expires.
+     * @param string $rfid The badge number.
+     * @return array|WP_Error ['is_valid' => bool, 'message' => string, 'cardholder' => object|null]
+     */
+    private function check_card( $rfid ) {
+        global $wpdb;
 
         $cardholder = $wpdb->get_row($wpdb->prepare(
             "SELECT first_name, last_name, photo, ch.cardholder_status, cred.status AS credential_status, 
@@ -158,29 +251,12 @@ class Fsbhoa_Kiosk_REST_API {
         } elseif ($cardholder->credential_status !== 'active') {
             $is_valid = false;
             $message = 'Card is not active.';
-        } elseif (strtotime($cardholder->card_expiry_date) < time()) {
+        } elseif (!empty($cardholder->card_expiry_date) && strtotime($cardholder->card_expiry_date) < current_time('timestamp')) {
             $is_valid = false;
             $message = 'Card has expired.';
         }
 
-        
-        if ($is_valid) {
-            // If the card is valid, send the cardholder data to the kiosk UI
-            $cardholder_data = [
-                'name'  => trim($cardholder->first_name . ' ' . $cardholder->last_name),
-                'photo' => !empty($cardholder->photo) ? base64_encode($cardholder->photo) : null,
-            ];
-            $response = ['isValid' => true, 'message' => $message, 'cardholder' => $cardholder_data];
-        } else {
-            // If the card is NOT valid, log the failure and notify the monitor
-            $log_id = $this->_log_kiosk_event($rfid, 'Kiosk Validation: ' . $message, false);
-            if ($log_id > 0) {
-                 $this->send_notification_to_monitor($log_id);
-            }
-            $response = ['isValid' => false, 'message' => $message];
-        }
-
-        return new WP_REST_Response($response, 200);
+        return ['is_valid' => $is_valid, 'message' => $message, 'cardholder' => $cardholder];
     }
 
     /**

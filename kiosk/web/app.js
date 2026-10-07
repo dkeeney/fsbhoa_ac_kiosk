@@ -25,6 +25,7 @@ let lastSwipedCard = null;
 let socket = null;
 let audioCtx;
 let hasConnectedBefore = false;
+let notRegistered = false;
 let rfidBuffer = "";
 
 // Gesture Variables
@@ -32,9 +33,9 @@ let logoTapCount = 0;
 let logoTapTimer = null;
 let logoLongPressTimer = null;
 
-let kioskIdentity = null;
-
-async function initializeKiosk() {
+// The server decides which station this is from the browser's IP address,
+// so the page has no station setup of its own.
+function initializeKiosk() {
     const urlParams = new URLSearchParams(window.location.search);
     logToScreen("Initializing Kiosk Logic...");
 
@@ -42,116 +43,15 @@ async function initializeKiosk() {
         logToScreen(`SYSTEM: Hard Refresh detected. Build: ${urlParams.get('v')}`);
     }
 
-    if (urlParams.has('reset_kiosk')) {
-        logToScreen("Step 2: Reset command detected.");
-        localStorage.removeItem('fsbhoa_kiosk_identity');
-        alert("Kiosk Configuration Cleared. Reloading...");
-        window.location.href = window.location.pathname;
-        return;
-    }
-
-    if (urlParams.has('auto_name')) {
-        logToScreen("Step 3: Auto-Config detected.");
-        const success = await handleAutoConfig(urlParams.get('auto_name'));
-        if (success) {
-            connect();
-            return;
-        }
-    }
-
-    const stored = localStorage.getItem('fsbhoa_kiosk_identity');
-    if (stored) {
-        logToScreen("Step 4: Found existing identity in storage.");
-        try {
-            kioskIdentity = JSON.parse(stored);
-            logToScreen(`Identity Loaded: ${kioskIdentity.name} (ID: ${kioskIdentity.id})`);
-            document.getElementById('setup-screen').style.display = 'none';
-            document.getElementById('idle-screen').style.display = 'block';
-            connect();
-            return;
-        } catch (e) {
-            logToScreen("Error: Storage corrupted. Clearing. " + e.message);
-            localStorage.removeItem('fsbhoa_kiosk_identity');
-        }
-    }
-
-    logToScreen("Step 5: No identity found. Showing setup screen.");
-    showSetupScreen();
-}
-
-async function handleAutoConfig(gateName) {
+    // Clear the station identity older versions kept in the browser.
     try {
-        logToScreen(`Attempting Auto-Config for Gate: '${gateName}'...`);
-        const doors = await fetchGateList();
-        const match = doors.find(d => d.friendly_name === gateName);
-        if (match) {
-            saveIdentityToStorage(match);
-            logToScreen(`Auto-Config Success. ID derived: ${match.door_record_id}`);
-            window.history.replaceState({}, document.title, window.location.pathname);
-            return true;
-        } else {
-            logToScreen(`Error: No gate found with name '${gateName}'`);
-            alert(`Auto-Config Failed: Gate '${gateName}' not found.`);
-            return false;
-        }
-    } catch (err) {
-        logToScreen("Auto-Config Network Error: " + err.message);
-        return false;
+        localStorage.removeItem('fsbhoa_kiosk_identity');
+    } catch (e) {
+        // Storage unavailable; nothing to clear.
     }
-}
 
-function showSetupScreen() {
-    document.getElementById('idle-screen').style.display = 'none';
-    document.getElementById('setup-screen').style.display = 'block';
-    fetchGateList()
-        .then(doors => {
-            const select = document.getElementById('kiosk-location-select');
-            select.innerHTML = '<option value="">-- Select Gate Location --</option>';
-            doors.forEach(door => {
-                const valObj = {
-                    id: door.door_record_id,
-                    name: door.friendly_name,
-                    serial: door.uhppoted_device_id,
-                    door: door.door_number_on_controller
-                };
-                const opt = document.createElement('option');
-                opt.value = JSON.stringify(valObj);
-                opt.textContent = door.friendly_name;
-                select.appendChild(opt);
-            });
-        })
-        .catch(err => {
-            logToScreen("Error fetching gate list: " + err.message);
-        });
+    connect();
 }
-
-async function fetchGateList() {
-    const targetEndpoint = '/fsbhoa/v1/monitor/gates?role=KIOSK';
-    const response = await fetch(`/api/proxy?endpoint=${encodeURIComponent(targetEndpoint)}`);
-    if (!response.ok) throw new Error(`API Error: ${response.status}`);
-    return await response.json();
-}
-
-function saveIdentityToStorage(doorRecord) {
-    const config = {
-        id: doorRecord.door_record_id,
-        name: doorRecord.friendly_name,
-        serial: doorRecord.uhppoted_device_id,
-        door: doorRecord.door_number_on_controller
-    };
-    localStorage.setItem('fsbhoa_kiosk_identity', JSON.stringify(config));
-    kioskIdentity = config;
-}
-
-window.saveKioskIdentity = function() {
-    const select = document.getElementById('kiosk-location-select');
-    if (select.value) {
-        localStorage.setItem('fsbhoa_kiosk_identity', select.value);
-        location.reload();
-    } else {
-        alert("Please select a location.");
-    }
-};
 
 function logToScreen(message) {
     console.log(message);
@@ -188,17 +88,14 @@ function beep(count, volume, duration) {
 }
 
 function connect() {
-    let doorParam = '';
-    if (kioskIdentity && kioskIdentity.id) {
-        doorParam = `?doorId=${kioskIdentity.id}`;
-    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socketURL = `${protocol}//${window.location.host}/ws${doorParam}`;
+    const socketURL = `${protocol}//${window.location.host}/ws`;
 
     logToScreen(`Connecting to WebSocket at: ${socketURL}`);
     socket = new WebSocket(socketURL);
 
     socket.addEventListener('open', () => {
+        notRegistered = false;
         if (!hasConnectedBefore) {
             hasConnectedBefore = true;
             resetKiosk();
@@ -214,7 +111,22 @@ function connect() {
             }
             logToScreen("Received: " + JSON.stringify(loggable));
 
-            if (message.event === 'kioskConfig') {
+            if (message.event === 'notRegistered') {
+                notRegistered = true;
+                stopFocusCapture();
+                statusMessage.textContent = `This device (${message.payload.ip}) is not registered as a kiosk station. ` +
+                    'An administrator can add this address on the Kiosk Stations page.';
+                statusMessage.style.color = 'red';
+            } else if (message.event === 'stationError') {
+                statusMessage.textContent = 'Cannot reach the access control server. Retrying...';
+                statusMessage.style.color = 'orange';
+            } else if (message.event === 'station') {
+                logToScreen(`Station: ${message.payload.name} (${message.payload.ip})`);
+                // Connected and registered: clear any "not registered" or "disconnected" message.
+                if (!sessionActive) {
+                    resetKiosk();
+                }
+            } else if (message.event === 'kioskConfig') {
                 kioskConfig = message.payload;
                 if (kioskConfig.logo_url) {
                     logoImage.src = kioskConfig.logo_url;
@@ -266,6 +178,12 @@ function connect() {
     });
 
     socket.addEventListener('close', () => {
+        if (notRegistered) {
+            // Keep the "not registered" message up and check again less often.
+            logToScreen('Not registered. Checking again in 30 seconds.');
+            setTimeout(connect, 30000);
+            return;
+        }
         logToScreen('WebSocket connection closed. Retrying in 5 seconds.');
         statusMessage.textContent = 'Status: Disconnected. Attempting to reconnect...';
         statusMessage.style.color = 'orange';
@@ -317,21 +235,13 @@ function createAmenityButtons(amenities) {
             clearTimeout(idleTimeout);
             clearTimeout(resetKioskTimer);
             const selectedAmenityName = this.dataset.name;
-            let finalDoorNumber = 1;
-            let finalSerial = '900000';
-            if (kioskIdentity) {
-                finalDoorNumber = kioskIdentity.door;
-                finalSerial = kioskIdentity.serial;
-            }
             try {
+                // The server logs the card it validated for this connection and this station.
                 const messageToSend = {
                     event: 'amenitySelected',
                     payload: {
-                        rfid: lastSwipedCard,
                         amenity: selectedAmenityName,
-                        guests: selectedGuestCount,
-                        serial_number: finalSerial,
-                        door_number: finalDoorNumber
+                        guests: selectedGuestCount
                     }
                 };
                 // Add this line so we can see it in the debug window!
@@ -369,11 +279,8 @@ function handleIdleTimeout() {
     socket.send(JSON.stringify({
         event: 'amenitySelected',
         payload: {
-            rfid: lastSwipedCard,
             amenity: 'Lobby',
-            guests: selectedGuestCount,
-            serial_number: kioskIdentity ? kioskIdentity.serial : '900000',
-            door_number: kioskIdentity ? kioskIdentity.door : 1
+            guests: selectedGuestCount
         }
     }));
     statusMessage.textContent = 'Sign-in for Lobby recorded due to inactivity.';

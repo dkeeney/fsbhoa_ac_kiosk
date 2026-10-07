@@ -34,7 +34,8 @@ WP_URL=$(jq -r '.wordpress_api_base_url' "$CONFIG_FILE" | sed 's|/$||')
 PORT=$(jq -r '.port' "$CONFIG_FILE" | sed 's/://g')
 if [ -z "$PORT" ] || [ "$PORT" == "null" ]; then PORT="8080"; fi
 
-KIOSK_URL="${WP_URL}:${PORT}/?auto_name=LobbyKiosk"
+# The kiosk service identifies the station from this machine's IP address.
+KIOSK_URL="${WP_URL}:${PORT}/"
 
 # Force Firefox to think it shut down normally
 # This prevents the "Restore Session" nag bar on boot
