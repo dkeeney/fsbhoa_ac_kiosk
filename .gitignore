@@ -1,0 +1,2 @@
+# Go build output (rebuild.sh builds here, then installs to /usr/local/bin)
+kiosk/fsbhoa_kiosk

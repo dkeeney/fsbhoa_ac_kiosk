@@ -34,24 +34,31 @@
     - [x] Follow-up: the Admin Override station appeared in the kiosk setup screen's gate list. Gone with #1 (setup screen removed; slot 0 has no IP so no browser can connect as it).
     - [ ] Follow-up: usage analytics label every `900000` event as "Lobby Kiosk" (see #13).
 - [x] **3. Kiosk hangs when direct load fails.** _Goes away with #2._ The `startSessionById` error branch builds a failure message but never sends it (`kiosk/main.go:466`).
-- [ ] **4. Testbed can point at production.** `update_kiosk_service_config` falls back to `access.fsbhoa.com` when `fsbhoa_ac_wp_host` is missing. Should fail closed per `ARCHITECTURE.md`.
-- [ ] **5. API key written to the log** at startup (`kiosk/main.go:86`).
+- [x] **4. Testbed can point at production.** `update_kiosk_service_config` falls back to `access.fsbhoa.com` when `fsbhoa_ac_wp_host` is missing. Should fail closed per `ARCHITECTURE.md`.
+  - Done 2026-10-07: with no host set, it logs why and keeps the existing `kiosk.json` instead of writing one. Tested with the option blanked.
+  - [ ] Core has the same `access.fsbhoa.com` fallback in `includes/class-fsbhoa-shortcodes.php` (monitor websocket host) and `includes/admin/class-fsbhoa-ac-settings-page.php`. Raise with core.
+- [x] **5. API key written to the log** at startup (`kiosk/main.go:101`). Done 2026-10-07: logs only whether a key is present. Takes effect after `./rebuild.sh install`.
 - [x] **6. No expiration date counts as expired.** _Fixed in #1 (shared `check_card`) and in the Admin Override._ `strtotime(null) < time()` is true; `expiration_date` can be `NULL`.
 - [x] **7. Direct-load sign-ins use serial `"000000"`** instead of the virtual controller `900000` (`kiosk/web/app.js:96`). _Goes away with #2._
-- [ ] **8. Failed swipes logged inconsistently.** Written directly to `ac_access_log` as controller `'kiosk'`, door 0, bypassing `Fsbhoa_Access_Service`.
+- [x] **8. Failed swipes logged inconsistently.** Written directly to `ac_access_log` as controller `'kiosk'`, door 0, bypassing `Fsbhoa_Access_Service`.
+  - Done 2026-10-07: the Go service sends its station's door number with each card check (`validate-card/{rfid}?door_number=N`; required). A rejected card is logged through the access service at `900000` / that door, so the monitor shows the station name. Removed the plugin's own `_log_kiosk_event` and monitor notifier.
+  - Core monitor: when no door matches an event, the gate name falls back to the controller's name, then "Unknown Gate". Replaces the `fsbhoa_kiosk_name` fallback.
+  - Tested: unknown card at door 1 logged as 61102, monitor shows "TestbedKiosk"; with a door that doesn't exist it shows the controller's name. A request without `door_number` gets 400.
+  - Requires `./rebuild.sh install`; the old service doesn't send the door number, so its card checks fail.
+  - Older rows with controller `'kiosk'` stay as they are. Reports still label them "Kiosk".
 - [ ] **9. Inactivity timeout signs in to hardcoded `'Lobby'`** (`kiosk/web/app.js:417`), which may not exist in `ac_amenities`.
 - [ ] **10. Amenity and max-guest changes need a service restart.** The Go service fetches config only at startup.
 - [ ] **11. `deploy_kiosk.sh` conflicts with the symlink setup.** It rsyncs the repo onto itself, runs `chown -R www-data` on the repo, and copies `web/` to an unused location. Fix or remove; `rebuild.sh` matches reality.
 - [ ] **12. Housekeeping**
-  - [ ] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.
-  - [ ] Whitelist option names in `ajax_save_kiosk_settings`.
-  - [ ] Stop `ensure_virtual_kiosk_controller` running queries on every request.
-  - [ ] Remove or wire up the `fsbhoa_kiosk_name` setting. (`handle_delete_kiosk_station` was removed in #14.)
+  - [x] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.
+  - [x] Whitelist option names in `ajax_save_kiosk_settings`. Each field has its own sanitizer; unknown names are logged and ignored.
+  - [x] Stop `ensure_virtual_kiosk_controller` running queries on every request. It is now a public static that the Stations page and the Admin Override call when they need the controller. It no longer recreates a "Test Kiosk" station 1, which used to come back after being deleted.
+  - [x] Removed the Kiosk Display Name (`fsbhoa_kiosk_name`) setting along with core's monitor fallback (done with #8). The stored option is left in `wp_options` and is unused. (`handle_delete_kiosk_station` was removed in #14.)
 - [ ] **13. Core references the kiosk plugin (breaks core rule 1).** Changes go in `fsbhoa_ac_core`.
   - [x] Add a hook in the cardholder list's actions column, e.g. `do_action( 'fsbhoa_cardholder_list_action_icons', $cardholder )` (`includes/cardholder/views/view-cardholder-list.php`).
   - [x] Remove the hardcoded kiosk icon (`view-cardholder-list.php:130`), the `kiosk_url` built from `fsbhoa_kiosk_port` (`includes/class-fsbhoa-shortcodes.php:104`), and the `.fsbhoa-kiosk-signin-link` click handler (`assets/js/fsbhoa-cardholder-admin.js:355`).
   - Done 2026-10-07. Also added `do_action( 'fsbhoa_enqueue_cardholder_assets' )` in `class-fsbhoa-shortcodes.php` so extensions can load assets on the cardholder page, and listed both hooks in `ARCHITECTURE.md`.
-  - [ ] Check core's other kiosk references: the `fsbhoa_kiosk_name` fallback in `includes/monitor/class-fsbhoa-monitor-rest-api.php`, `'Lobby Kiosk'` in `includes/reports/class-fsbhoa-reports-rest-api.php`, the kiosk test in `includes/admin/class-fsbhoa-test-suite-actions.php`, and `fsbhoa_ac_kiosk_api_key` used by `includes/api/class-fsbhoa-verification-rest-api.php`.
+  - [ ] Check core's other kiosk references: ~~the `fsbhoa_kiosk_name` fallback in `includes/monitor/class-fsbhoa-monitor-rest-api.php`~~ (removed with #8), the `'kiosk'` controller checks in `includes/fsbhoa-access-service-functions.php` and the reports, `'Lobby Kiosk'` in `includes/reports/class-fsbhoa-reports-rest-api.php`, the kiosk test in `includes/admin/class-fsbhoa-test-suite-actions.php`, and `fsbhoa_ac_kiosk_api_key` used by `includes/api/class-fsbhoa-verification-rest-api.php`.
 - [x] **14. The plugin assumes only one `VIRTUAL_KIOSK` controller.** The testbed has two: `900000` (kiosk) and `900001` ("QR Scan", used by `fsbhoa_light` for court gates). Code that finds the controller with `WHERE type = 'VIRTUAL_KIOSK' LIMIT 1` can pick the wrong one.
   - [x] Admin Override station lookup now matches serial `900000` (2026-10-07).
   - [x] `ensure_virtual_kiosk_controller` and the Add Station form in `class-fsbhoa-kiosk-stations-page.php` use `LIMIT 1` on the type.

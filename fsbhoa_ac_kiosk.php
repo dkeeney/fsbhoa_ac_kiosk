@@ -37,9 +37,6 @@ class Fsbhoa_AC_Kiosk {
             return;
         }
 
-        // Ensure virtual kiosk controller & gates exist in the database
-        $this->ensure_virtual_kiosk_controller();
-
         $this->includes();
         $this->instantiate_classes();
     }
@@ -103,45 +100,36 @@ class Fsbhoa_AC_Kiosk {
         echo '<div class="notice notice-error"><p><strong>FSBHOA Kiosk Plugin:</strong> The FSBHOA Core plugin is missing or deactivated. The Kiosk module will not function.</p></div>';
     }
 
-    private function ensure_virtual_kiosk_controller() {
+    /**
+     * Returns the record id of the kiosk's virtual controller, creating it if needed.
+     * Called on demand (Stations page, Admin Override) rather than on every request.
+     * Stations are not seeded; add them on the Kiosk Stations page with an IP address.
+     * @return int Controller record id, or 0 if it could not be created.
+     */
+    public static function ensure_virtual_kiosk_controller() {
         global $wpdb;
 
-        $controllers_table = 'ac_controllers';
-        $doors_table = 'ac_doors';
-
-        // 1. Check if the VIRTUAL_KIOSK controller already exists (matching 900000)
-        $controller_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT controller_record_id FROM {$controllers_table} WHERE type = %s AND uhppoted_device_id = %d LIMIT 1",
+        $controller_id = (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT controller_record_id FROM ac_controllers WHERE type = %s AND uhppoted_device_id = %d LIMIT 1",
             'VIRTUAL_KIOSK',
             self::VIRTUAL_CONTROLLER_SERIAL
         ) );
 
-        // If not, create it
         if ( ! $controller_id ) {
-            $wpdb->insert( $controllers_table, [
+            $inserted = $wpdb->insert( 'ac_controllers', [
                 'uhppoted_device_id' => self::VIRTUAL_CONTROLLER_SERIAL,
                 'friendly_name'      => 'Virtual Kiosk Controller',
                 'notes'              => 'Auto-seeded by Kiosk module for virtual check-ins.',
                 'type'               => 'VIRTUAL_KIOSK',
             ] );
-            $controller_id = $wpdb->insert_id;
+            if ( false === $inserted ) {
+                error_log( 'KIOSK: Could not create virtual kiosk controller: ' . $wpdb->last_error );
+                return 0;
+            }
+            $controller_id = (int) $wpdb->insert_id;
         }
 
-        // 2. Ensure a default door/gate exists for this controller
-        $door_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT door_record_id FROM {$doors_table} WHERE controller_record_id = %d AND door_number_on_controller = %d LIMIT 1",
-            $controller_id,
-            1
-        ) );
-
-        if ( ! $door_id ) {
-            $wpdb->insert( $doors_table, [
-                'controller_record_id'      => $controller_id,
-                'door_number_on_controller' => 1,
-                'friendly_name'             => 'Test Kiosk',
-                'door_role'                 => 'KIOSK',
-            ] );
-        }
+        return $controller_id;
     }
 
 }

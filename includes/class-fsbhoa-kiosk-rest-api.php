@@ -195,6 +195,12 @@ class Fsbhoa_Kiosk_REST_API {
     public function validate_card_callback( WP_REST_Request $request ) {
         $rfid = sanitize_text_field($request['rfid']);
 
+        // The station where the card was swiped, so a failure is logged at that station.
+        $door_number = absint( $request->get_param('door_number') );
+        if ( ! $door_number ) {
+            return new WP_Error( 'bad_request', 'Missing door_number for the swiping station.', ['status' => 400] );
+        }
+
         $card = $this->check_card( $rfid );
         if ( is_wp_error( $card ) ) { return $card; }
 
@@ -210,10 +216,19 @@ class Fsbhoa_Kiosk_REST_API {
             ];
             $response = ['isValid' => true, 'message' => $message, 'cardholder' => $cardholder_data];
         } else {
-            // If the card is NOT valid, log the failure and notify the monitor
-            $log_id = $this->_log_kiosk_event($rfid, 'Kiosk Validation: ' . $message, false);
-            if ($log_id > 0) {
-                 $this->send_notification_to_monitor($log_id);
+            // If the card is NOT valid, log the failure at the station. The access service
+            // writes the event and notifies the monitor.
+            $result = Fsbhoa_Access_Service::process_and_write_event( [
+                'event_timestamp'       => current_time('mysql'),
+                'controller_identifier' => (string) Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL,
+                'door_number'           => $door_number,
+                'rfid_id'               => $rfid,
+                'event_type_code'       => 101, // Failure
+                'event_description'     => 'Kiosk Validation: ' . $message,
+                'access_granted'        => 0,
+            ] );
+            if ( is_wp_error( $result ) && $result->get_error_code() !== 'rate_limit' ) {
+                error_log( 'KIOSK: Failed to log rejected swipe: ' . $result->get_error_message() );
             }
             $response = ['isValid' => false, 'message' => $message];
         }
@@ -257,71 +272,6 @@ class Fsbhoa_Kiosk_REST_API {
         }
 
         return ['is_valid' => $is_valid, 'message' => $message, 'cardholder' => $cardholder];
-    }
-
-    /**
-     * Private helper to send notifications to monitor
-     */
-    private function send_notification_to_monitor($log_id){
-        // Get the configured port for the monitor service
-        $port = get_option('fsbhoa_ac_monitor_port', 8082);
-
-        // Check if TLS certificates are configured in the general settings
-        $tls_cert_path = get_option('fsbhoa_ac_tls_cert_path', '');
-        $tls_key_path  = get_option('fsbhoa_ac_tls_key_path', '');
-
-        // Choose the correct protocol for the internal API call
-        $protocol = (!empty($tls_cert_path) && !empty($tls_key_path)) ? 'https' : 'http';
-    
-        // Build the URL using the dynamic protocol
-        $monitor_url = sprintf('%s://127.0.0.1:%d/notify', $protocol, $port);
-
-        $post_body = [
-            'event_id' => $log_id,
-        ];
-        
-        // Note: Using http, so sslverify is not needed.
-        $monitor_response = wp_remote_post($monitor_url, [
-            'method'    => 'POST',
-            'headers'   => ['Content-Type' => 'application/json; charset=utf-8'],
-            'body'      => json_encode($post_body),
-            'timeout'   => 5,
-            'sslverify' => false,
-        ]);
-
-        if( is_wp_error( $monitor_response ) ){
-            error_log('KIOSK-NOTIFY-ERROR: Failed to notify monitor_service. Reason: ' . $monitor_response->get_error_message());
-        } else {
-            error_log('KIOSK-NOTIFY-SUCCESS: Successfully sent notification to monitor_service for event_id: ' . $log_id);
-        }
-    }
-
-    /**
-     * Private helper to log kiosk events.
-     */
-    private function _log_kiosk_event($rfid, $description, $is_granted) {
-        global $wpdb;
-
-        $cardholder_id = $wpdb->get_var($wpdb->prepare("
-            SELECT cardholder_id as id 
-            FROM ac_credentials 
-            WHERE credential_value = %s AND credential_type = 'MIFARE_BADGE'", 
-            $rfid));
-
-        $log_data = [
-            'event_timestamp'       => current_time('mysql'),
-            'controller_identifier' => 'kiosk',
-            'door_number'           => 0,
-            'rfid_id'               => $rfid,
-            'cardholder_id'         => $cardholder_id ? (int)$cardholder_id : null,
-            'event_type_code'       => $is_granted ? 100 : 101, // 100=Success, 101=Failure
-            'event_description'     => $description,
-            'access_granted'        => $is_granted ? 1 : 0,
-        ];
-
-        // CORRECTED: Use insert_id to get the new record ID.
-        $wpdb->insert('ac_access_log', $log_data);
-        return $wpdb->insert_id;
     }
 
 }

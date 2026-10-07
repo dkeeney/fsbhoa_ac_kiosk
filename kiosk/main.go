@@ -98,7 +98,7 @@ func loadConfiguration() {
 	if err != nil {
 		log.Fatalf("FATAL: Could not parse config file: %v", err)
 	}
-        log.Printf("Kiosk service starting. Config loaded. API Key Found: '%s'", config.APIKey)
+        log.Printf("Kiosk service starting. Config loaded. API key present: %t", config.APIKey != "")
 }
 
 // setupLogging configures the log output to a file if specified.
@@ -250,9 +250,10 @@ func broadcast(message SocketMessage) {
 
 // This helper function cleanly validates a single RFID against WordPress.
 // It's called by the wallet scan logic. It returns the response, the validated RFID, and any error.
-func validateRFID(rfid string) (ValidationResponse, string, error) {
+// WordPress logs a rejected card at the given station's door.
+func validateRFID(rfid string, station Station) (ValidationResponse, string, error) {
 	var vResponse ValidationResponse
-	validationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/validate-card/%s", config.WordPressAPIBaseURL, rfid)
+	validationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/validate-card/%s?door_number=%d", config.WordPressAPIBaseURL, url.PathEscape(rfid), station.DoorNumber)
 	req, err := http.NewRequest("GET", validationURL, nil)
 	if err != nil {
 		log.Printf("Error creating validation request for %s: %v", rfid, err)
@@ -434,7 +435,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 		// Check each unique RFID until we find a valid one.
 		for _, rfid := range finalRFIDs {
-			vResponse, checkedRFID, err := validateRFID(rfid)
+			vResponse, checkedRFID, err := validateRFID(rfid, station)
 			if err == nil && vResponse.IsValid {
 				log.Printf("Found valid card in wallet: %s", checkedRFID)
 				validCardResponse = vResponse

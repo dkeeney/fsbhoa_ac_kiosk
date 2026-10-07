@@ -154,25 +154,21 @@ class Fsbhoa_Kiosk_Admin_Override {
     private function get_station() {
         global $wpdb;
 
-        $controller = $wpdb->get_row( $wpdb->prepare(
-            "SELECT controller_record_id, uhppoted_device_id FROM ac_controllers WHERE type = %s AND uhppoted_device_id = %d LIMIT 1",
-            'VIRTUAL_KIOSK',
-            Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL
-        ) );
-        if ( ! $controller ) {
-            error_log( 'KIOSK ADMIN OVERRIDE: Virtual kiosk controller not found.' );
+        $controller_id = Fsbhoa_AC_Kiosk::ensure_virtual_kiosk_controller();
+        if ( ! $controller_id ) {
+            error_log( 'KIOSK ADMIN OVERRIDE: Virtual kiosk controller not available.' );
             return null;
         }
 
         $door_id = $wpdb->get_var( $wpdb->prepare(
             "SELECT door_record_id FROM ac_doors WHERE controller_record_id = %d AND door_number_on_controller = %d LIMIT 1",
-            $controller->controller_record_id,
+            $controller_id,
             self::STATION_DOOR_NUMBER
         ) );
 
         if ( ! $door_id ) {
             $inserted = $wpdb->insert( 'ac_doors', array(
-                'controller_record_id'      => $controller->controller_record_id,
+                'controller_record_id'      => $controller_id,
                 'door_number_on_controller' => self::STATION_DOOR_NUMBER,
                 'friendly_name'             => self::STATION_NAME,
                 'door_role'                 => 'KIOSK',
@@ -185,7 +181,7 @@ class Fsbhoa_Kiosk_Admin_Override {
         }
 
         return array(
-            'serial'      => $controller->uhppoted_device_id,
+            'serial'      => Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL,
             'door_number' => self::STATION_DOOR_NUMBER,
         );
     }

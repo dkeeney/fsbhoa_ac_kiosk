@@ -40,12 +40,6 @@ class Fsbhoa_Kiosk_Settings {
         ]);
         register_setting($kiosk_option_group, 'fsbhoa_kiosk_splash_url', 'esc_url_raw');
 
-        // Display Name
-        add_settings_field('fsbhoa_kiosk_name_field', 'Kiosk Display Name', array($this, 'render_field_callback'), $kiosk_page_slug, 'fsbhoa_ac_kiosk_logo_section', [
-            'id' => 'fsbhoa_kiosk_name', 'type' => 'text', 'default' => 'Front Desk Kiosk', 'desc' => 'Name displayed for kiosk events on the Real-time Display.'
-        ]);
-        register_setting($kiosk_option_group, 'fsbhoa_kiosk_name', 'sanitize_text_field');
-
         // Port
         add_settings_field('fsbhoa_kiosk_port_field', 'Kiosk Service Port', array($this, 'render_field_callback'), $kiosk_page_slug, 'fsbhoa_ac_kiosk_logo_section', [
             'id' => 'fsbhoa_kiosk_port', 'type' => 'number', 'default' => 8080, 'desc' => 'The port the kiosk service listens on for secure HTTPS connections.'
@@ -135,11 +129,24 @@ class Fsbhoa_Kiosk_Settings {
         check_ajax_referer('fsbhoa_kiosk_settings_nonce', 'nonce');
         if (!current_user_can('manage_options')) { wp_send_json_error('Permission denied.', 403); }
 
-        $options = isset($_POST['options']) ? $_POST['options'] : [];
-        if (!empty($options)) {
-            foreach ($options as $option) {
-                update_option(sanitize_key($option['name']), sanitize_text_field($option['value']));
+        // Only the fields on this page may be saved, each with its own sanitizer.
+        $allowed = [
+            'fsbhoa_kiosk_logo_url'   => 'esc_url_raw',
+            'fsbhoa_kiosk_splash_url' => 'esc_url_raw',
+            'fsbhoa_kiosk_port'       => 'absint',
+            'fsbhoa_ac_kiosk_api_key' => 'sanitize_text_field',
+            'fsbhoa_kiosk_log_file'   => 'sanitize_text_field',
+            'fsbhoa_kiosk_max_guests' => 'absint',
+        ];
+
+        $options = isset($_POST['options']) && is_array($_POST['options']) ? wp_unslash($_POST['options']) : [];
+        foreach ($options as $option) {
+            $name = isset($option['name']) ? sanitize_key($option['name']) : '';
+            if (!isset($allowed[$name])) {
+                error_log('KIOSK SETTINGS: Ignored unknown option in save request: ' . $name);
+                continue;
             }
+            update_option($name, call_user_func($allowed[$name], $option['value'] ?? ''));
         }
 
         $this->update_kiosk_service_config();
@@ -156,7 +163,7 @@ class Fsbhoa_Kiosk_Settings {
 
     public function trigger_config_update_on_save($option_name, $old_value, $new_value) {
         $kiosk_options = [
-            'fsbhoa_kiosk_logo_url', 'fsbhoa_kiosk_name', 'fsbhoa_kiosk_port', 'fsbhoa_kiosk_log_file', 'fsbhoa_ac_kiosk_api_key'
+            'fsbhoa_kiosk_logo_url', 'fsbhoa_kiosk_port', 'fsbhoa_kiosk_log_file', 'fsbhoa_ac_kiosk_api_key'
         ];
         if (in_array($option_name, $kiosk_options)) {
             $this->update_kiosk_service_config();
@@ -171,10 +178,18 @@ class Fsbhoa_Kiosk_Settings {
         // Read Global Core Settings
         $tls_cert_path  = get_option('fsbhoa_ac_tls_cert_path', '');
         $tls_key_path   = get_option('fsbhoa_ac_tls_key_path', '');
-        $wp_host        = get_option('fsbhoa_ac_wp_host', 'access.fsbhoa.com');
+        $wp_host        = trim((string) get_option('fsbhoa_ac_wp_host', ''));
         $websocket_port = get_option('fsbhoa_ac_websocket_port', 8083);
         $monitor_port   = get_option('fsbhoa_ac_monitor_port', 8082);
         $protocol       = (!empty($tls_cert_path) && !empty($tls_key_path)) ? 'https' : 'http';
+
+        // Fail closed: without this server's own host name, the monitor and event URLs
+        // could point at another system (e.g. a testbed reaching production). Keep the
+        // existing kiosk.json rather than guess.
+        if ($wp_host === '') {
+            error_log('KIOSK CONFIG: Not writing ' . $this->kiosk_config_path . ': the WordPress host name (fsbhoa_ac_wp_host) is not set in the FSBHOA AC settings.');
+            return;
+        }
 
         // Read Kiosk Specific Settings
         $kiosk_port = get_option('fsbhoa_kiosk_port', 8080);

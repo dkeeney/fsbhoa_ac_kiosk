@@ -11,11 +11,7 @@ class Fsbhoa_Kiosk_Stations_Page {
 
         // Only doors on the kiosk's own virtual controller are kiosk stations. Other
         // VIRTUAL_KIOSK controllers (e.g. 900001 for QR scans) belong to other plugins.
-        $controller_id = (int) $wpdb->get_var( $wpdb->prepare(
-            "SELECT controller_record_id FROM ac_controllers WHERE type = %s AND uhppoted_device_id = %d LIMIT 1",
-            'VIRTUAL_KIOSK',
-            Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL
-        ) );
+        $controller_id = Fsbhoa_AC_Kiosk::ensure_virtual_kiosk_controller();
 
         // 1. Handle form submission for ADDING a new kiosk station
         // Specifically look for 'fsbhoa_add_nonce' to avoid collisions
