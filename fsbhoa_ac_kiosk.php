@@ -46,6 +46,7 @@ class Fsbhoa_AC_Kiosk {
         require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-settings.php';
         require_once plugin_dir_path( __FILE__ ) . 'includes/admin/class-fsbhoa-kiosk-stations-page.php';
         require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-admin-override.php';
+        require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-regression-test.php';
     }
 
     private function instantiate_classes() {
@@ -61,13 +62,18 @@ class Fsbhoa_AC_Kiosk {
         // 3. Admin Override sign-in on the cardholder list (front-end page and AJAX)
         new Fsbhoa_Kiosk_Admin_Override();
 
-        // 4. Inject Kiosk Service into Core's System Status page
+        // 4. Kiosk checks in core's Diagnostics test suite
+        if ( is_admin() ) {
+            new Fsbhoa_Kiosk_Regression_Test();
+        }
+
+        // 5. Inject Kiosk Service into Core's System Status page
         add_filter( 'fsbhoa_system_services', function( $services ) {
             $services['fsbhoa_kiosk'] = 'Kiosk Service';
             return $services;
         });
 
-        // 5. Register Admin Menus
+        // 6. Register Admin Menus
         add_action( 'admin_menu', array( $this, 'register_admin_menus' ) );
     }
 
