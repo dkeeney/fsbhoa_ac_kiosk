@@ -63,6 +63,37 @@ class Fsbhoa_Kiosk_Settings {
             'id' => 'fsbhoa_kiosk_max_guests', 'type' => 'number', 'default' => 8, 'desc' => 'The maximum number of guests a resident can sign in.'
         ]);
         register_setting($kiosk_option_group, 'fsbhoa_kiosk_max_guests', 'absint');
+
+        // Inactivity sign-in
+        add_settings_field('fsbhoa_kiosk_idle_timeout_field', 'Inactivity Timeout (seconds)', array($this, 'render_field_callback'), $kiosk_page_slug, 'fsbhoa_ac_kiosk_logo_section', [
+            'id' => 'fsbhoa_kiosk_idle_timeout', 'type' => 'number', 'default' => 30, 'desc' => 'How long the kiosk waits for an amenity choice after a swipe before giving up.'
+        ]);
+        register_setting($kiosk_option_group, 'fsbhoa_kiosk_idle_timeout', 'absint');
+
+        add_settings_field('fsbhoa_kiosk_idle_amenity_field', 'Inactivity Amenity', array($this, 'render_amenity_select_callback'), $kiosk_page_slug, 'fsbhoa_ac_kiosk_logo_section', [
+            'id' => 'fsbhoa_kiosk_idle_amenity', 'desc' => 'When the timeout runs out, sign the cardholder in to this amenity. Choose "None" to record nothing.'
+        ]);
+        register_setting($kiosk_option_group, 'fsbhoa_kiosk_idle_amenity', 'sanitize_text_field');
+    }
+
+    public function render_amenity_select_callback($args) {
+        global $wpdb;
+        $id      = $args['id'];
+        $desc    = $args['desc'] ?? '';
+        $current = get_option($id, '');
+        $names   = $wpdb->get_col("SELECT name FROM ac_amenities WHERE is_active = 1 ORDER BY display_order ASC, name ASC");
+
+        echo "<select name='" . esc_attr($id) . "' id='" . esc_attr($id) . "'>";
+        echo "<option value=''>" . esc_html__('None (do not sign in)', 'fsbhoa-ac') . "</option>";
+        foreach ($names as $name) {
+            echo "<option value='" . esc_attr($name) . "'" . selected($current, $name, false) . ">" . esc_html($name) . "</option>";
+        }
+        // Keep a saved amenity visible even if it has since been deactivated, so the problem is obvious.
+        if ($current !== '' && ! in_array($current, $names, true)) {
+            echo "<option value='" . esc_attr($current) . "' selected>" . esc_html($current . ' (not active)') . "</option>";
+        }
+        echo "</select>";
+        if ($desc) { echo "<p class='description'>" . esc_html($desc) . "</p>"; }
     }
 
     public function render_field_callback($args) {
@@ -137,6 +168,8 @@ class Fsbhoa_Kiosk_Settings {
             'fsbhoa_ac_kiosk_api_key' => 'sanitize_text_field',
             'fsbhoa_kiosk_log_file'   => 'sanitize_text_field',
             'fsbhoa_kiosk_max_guests' => 'absint',
+            'fsbhoa_kiosk_idle_timeout' => 'absint',
+            'fsbhoa_kiosk_idle_amenity' => 'sanitize_text_field',
         ];
 
         $options = isset($_POST['options']) && is_array($_POST['options']) ? wp_unslash($_POST['options']) : [];

@@ -46,7 +46,9 @@
   - Tested: unknown card at door 1 logged as 61102, monitor shows "TestbedKiosk"; with a door that doesn't exist it shows the controller's name. A request without `door_number` gets 400.
   - Requires `./rebuild.sh install`; the old service doesn't send the door number, so its card checks fail.
   - Older rows with controller `'kiosk'` stay as they are. Reports still label them "Kiosk".
-- [ ] **9. Inactivity timeout signs in to hardcoded `'Lobby'`** (`kiosk/web/app.js:417`), which may not exist in `ac_amenities`.
+- [x] **9. Inactivity timeout signs in to hardcoded `'Lobby'`** (`kiosk/web/app.js:417`), which may not exist in `ac_amenities`.
+  - Done 2026-10-07: Kiosk Settings has "Inactivity Timeout (seconds)" (default 30) and "Inactivity Amenity" (a list of active amenities, or "None (do not sign in)"). `/kiosk/config` sends them to the kiosk page. An amenity that is no longer active is treated as None and logged.
+  - **Deployment:** the setting starts as None, so timeouts record nothing until an amenity is chosen. To keep today's behavior, choose Lobby on production's Kiosk Settings page after deploying.
 - [ ] **10. Amenity and max-guest changes need a service restart.** The Go service fetches config only at startup.
 - [ ] **11. `deploy_kiosk.sh` conflicts with the symlink setup.** It rsyncs the repo onto itself, runs `chown -R www-data` on the repo, and copies `web/` to an unused location. Fix or remove; `rebuild.sh` matches reality.
 - [ ] **12. Housekeeping**

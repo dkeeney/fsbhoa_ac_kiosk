@@ -41,6 +41,8 @@ type KioskConfig struct {
         SplashURL string    `json:"splash_url"`
 	Amenities []Amenity `json:"amenities"`
         MaxGuests int       `json:"max_guests"`
+	IdleAmenity        string `json:"idle_amenity"`         // blank: record nothing on timeout
+	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
 }
 
 type SocketMessage struct {
@@ -141,7 +143,7 @@ func fetchKioskConfig() {
 		log.Fatalf("FATAL: Could not parse kiosk config JSON: %v", err)
 	}
         kioskConfig.MaxGuests = config.MaxGuests
-	log.Printf("Successfully fetched config. Logo: '%s', Amenities: %d, MaxGuest: %d", kioskConfig.LogoURL, len(kioskConfig.Amenities), kioskConfig.MaxGuests)
+	log.Printf("Successfully fetched config. Logo: '%s', Amenities: %d, MaxGuest: %d, Inactivity: %ds -> '%s'", kioskConfig.LogoURL, len(kioskConfig.Amenities), kioskConfig.MaxGuests, kioskConfig.IdleTimeoutSeconds, kioskConfig.IdleAmenity)
 }
 
 // logSignInToWordPress sends the final amenity selection event to WordPress.

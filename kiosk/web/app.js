@@ -12,7 +12,7 @@ const guestButtonsContainer = document.getElementById('guest-buttons-container')
 const guestButtonsDiv = document.getElementById('guest-buttons');
 const splashScreen = document.getElementById('splash-screen');
 const splashImage = document.getElementById('splash-image');
-const AMENITY_SELECTION_TIMEOUT = 30000;
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 30;
 
 let idleTimeout;
 let sessionActive = false;
@@ -164,7 +164,7 @@ function connect() {
                     if(zeroButton) zeroButton.classList.add('selected');
                     idleTimerFired = false;
                     clearTimeout(idleTimeout);
-                    idleTimeout = setTimeout(handleIdleTimeout, AMENITY_SELECTION_TIMEOUT);
+                    idleTimeout = setTimeout(handleIdleTimeout, (kioskConfig.idle_timeout_seconds || DEFAULT_IDLE_TIMEOUT_SECONDS) * 1000);
                 } else {
                     statusMessage.textContent = swipeData.message;
                     statusMessage.style.color = 'red';
@@ -272,18 +272,20 @@ function handleIdleTimeout() {
     if (!sessionActive) return;
     sessionActive = false;
     idleTimerFired = true;
-    if (!lastSwipedCard) {
+    // The inactivity amenity comes from Kiosk Settings. Blank means record nothing.
+    const idleAmenity = kioskConfig.idle_amenity || '';
+    if (!lastSwipedCard || !idleAmenity) {
         resetKiosk();
         return;
     }
     socket.send(JSON.stringify({
         event: 'amenitySelected',
         payload: {
-            amenity: 'Lobby',
+            amenity: idleAmenity,
             guests: selectedGuestCount
         }
     }));
-    statusMessage.textContent = 'Sign-in for Lobby recorded due to inactivity.';
+    statusMessage.textContent = `Sign-in for ${idleAmenity} recorded due to inactivity.`;
     setTimeout(resetKiosk, 3000);
 }
 

@@ -67,10 +67,21 @@ class Fsbhoa_Kiosk_REST_API {
         );
         if ($wpdb->last_error) { return new WP_Error( 'db_error', 'Database error getting amenities.', ['status' => 500] ); }
 
+        // Amenity to sign in to when the cardholder doesn't choose one. Blank (or no longer
+        // active) means the kiosk records nothing on timeout.
+        $idle_amenity = get_option('fsbhoa_kiosk_idle_amenity', '');
+        if ($idle_amenity !== '' && ! in_array($idle_amenity, wp_list_pluck($amenities, 'name'), true)) {
+            error_log("KIOSK CONFIG: Inactivity amenity '{$idle_amenity}' is not an active amenity. Timeouts will not sign in.");
+            $idle_amenity = '';
+        }
+        $idle_timeout = absint(get_option('fsbhoa_kiosk_idle_timeout', 30));
+
         $response_data = [
             'logo_url' => get_option('fsbhoa_kiosk_logo_url', ''),
             'splash_url' => get_option('fsbhoa_kiosk_splash_url', ''),
             'amenities' => $amenities,
+            'idle_amenity' => $idle_amenity,
+            'idle_timeout_seconds' => $idle_timeout > 0 ? $idle_timeout : 30,
         ];
 
         return new WP_REST_Response( $response_data, 200 );
