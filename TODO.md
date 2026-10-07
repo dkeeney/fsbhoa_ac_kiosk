@@ -53,7 +53,14 @@
   - Code done 2026-10-07: the service checks `kiosk.json`'s timestamp every 10 seconds. When it changes, it re-reads the file and `/kiosk/config` and sends the new config to the open kiosk screens; no restart. Port, certificates, log file and event service URL still need a restart (logged). A failed reload keeps the last good settings.
   - WordPress rewrites `kiosk.json` (atomically, via a temp file) when Kiosk Settings are saved and, through the new core hook `fsbhoa_core_amenities_changed`, when amenities are added, edited, deleted, reordered or turned on/off.
   - [x] Tested on the testbed 2026-10-07: settings and amenity changes reached the kiosk screen without a restart.
-- [ ] **11. `deploy_kiosk.sh` conflicts with the symlink setup.** It rsyncs the repo onto itself, runs `chown -R www-data` on the repo, and copies `web/` to an unused location. Fix or remove; `rebuild.sh` matches reality.
+- [x] **11. `deploy_kiosk.sh` conflicts with the symlink setup.** It rsyncs the repo onto itself, runs `chown -R www-data` on the repo, and copies `web/` to an unused location. Fix or remove; `rebuild.sh` matches reality.
+  - Done 2026-10-07: deleted. The testbed uses symlinks and `rebuild.sh`.
+  - **Production deployment is on hold** until all the plugins are being worked on, so one deployment can set the pattern for all of them. Production today runs a single monolithic plugin. Ideas from the discussion:
+    - Plugin zips built from a git tag for the PHP side; a service bundle (binary, kiosk web files, unit) for each Go service; one release step that installs both so PHP and Go versions can't drift apart.
+    - The kiosk service serves its screen from its working directory (the repo). Production needs a fixed location, set in `kiosk.json`.
+    - Keep production's plugin folder names (WordPress tracks active plugins by folder).
+    - Database changes are manual `migration.sql` steps today; installing from zips works best if core applies them on a version change.
+    - `~/deploy-production.sh` isn't in any repo and still calls `deploy_kiosk.sh` (it skips a missing script).
 - [ ] **12. Housekeeping**
   - [x] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.
   - [x] Whitelist option names in `ajax_save_kiosk_settings`. Each field has its own sanitizer; unknown names are logged and ignored.
