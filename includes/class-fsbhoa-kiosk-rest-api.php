@@ -28,12 +28,6 @@ class Fsbhoa_Kiosk_REST_API {
             'callback'            => array( $this, 'validate_card_callback' ),
             'permission_callback' => array( $this, 'api_key_permission_check' ),
         ) );
-
-        register_rest_route( $this->namespace, '/kiosk/cardholder/(?P<id>\d+)', array(
-            'methods'               => 'GET',
-            'callback'              => array( $this, 'get_cardholder_by_id_callback' ),
-            'permission_callback'   => array( $this, 'api_key_permission_check' ),
-        ) );
     }
     /**
      * Security check for the Kiosk API endpoint.
@@ -90,7 +84,7 @@ class Fsbhoa_Kiosk_REST_API {
         // Identity Logic: Default to '900000' (Virtual) if not provided
         $controller_sn = isset($params['serial_number']) && !empty($params['serial_number']) 
             ? sanitize_text_field($params['serial_number']) 
-            : '900000';
+            : (string) Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL;
             
         $door_num = isset($params['door_number']) && $params['door_number'] > 0 
             ? absint($params['door_number']) 
@@ -254,52 +248,5 @@ class Fsbhoa_Kiosk_REST_API {
         return $wpdb->insert_id;
     }
 
-    /**
-     * Fetches and validates a cardholder by their primary ID.
-     * Used by the kiosk when launched from the WordPress UI.
-     */
-    public function get_cardholder_by_id_callback( WP_REST_Request $request ) {
-        global $wpdb;
-        $cardholder_id = absint($request['id']);
-
-        $cardholder = $wpdb->get_row($wpdb->prepare("
-            SELECT cred.credential_value as rfid_id, ch.first_name, ch.last_name, ch.photo, 
-             ch.cardholder_status, cred.status AS credential_status, cred.card_expiry_date AS card_expiry_date
-            FROM ac_cardholders ch LEFT JOIN ac_credentials cred ON ch.id = cred.cardholder_id AND cred.credential_type = 'MIFARE_BADGE' 
-            WHERE ch.id = %d",
-            $cardholder_id
-        ));
-
-        if (!$cardholder) {
-            return new WP_REST_Response(['isValid' => false, 'message' => 'Cardholder not found.'], 200);
-        }
-
-        $is_valid = true;
-        $message = 'Cardholder is valid.';
-
-        if ($cardholder->cardholder_status !== 'active') {
-            $is_valid = false;
-            $message = 'Cardholder is not active.';
-        } elseif ($cardholder->credential_status !== 'active') {
-            $is_valid = false;
-            $message = 'Card is not active.';
-        } elseif (strtotime($cardholder->card_expiry_date) < time()) {
-            $is_valid = false;
-            $message = 'Card has expired.';
-        }
-
-        if ($is_valid) {
-            $cardholder_data = [
-                'rfid'  => $cardholder->rfid_id,
-                'name'  => trim($cardholder->first_name . ' ' . $cardholder->last_name),
-                'photo' => !empty($cardholder->photo) ? base64_encode($cardholder->photo) : null,
-            ];
-            $response = ['isValid' => true, 'message' => $message, 'cardholder' => $cardholder_data];
-        } else {
-            $response = ['isValid' => false, 'message' => $message];
-        }
-
-        return new WP_REST_Response($response, 200);
-    }
 }
 

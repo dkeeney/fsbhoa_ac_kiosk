@@ -1,0 +1,44 @@
+/* Admin Override sign-in dialog (cardholder list) */
+#fsbhoa-kiosk-override-dialog h3 {
+    margin: 0.5em 0;
+}
+
+.fsbhoa-kiosk-override-guests,
+.fsbhoa-kiosk-override-amenities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 1em;
+}
+
+.fsbhoa-kiosk-override-guest {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 18px;
+}
+
+.fsbhoa-kiosk-override-amenity {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 120px;
+    height: auto !important;
+    padding: 8px !important;
+    white-space: normal;
+}
+
+.fsbhoa-kiosk-override-amenity img {
+    max-width: 80px;
+    max-height: 80px;
+    margin-bottom: 4px;
+}
+
+.fsbhoa-kiosk-override-message {
+    min-height: 1.5em;
+    font-weight: bold;
+}
+
+.fsbhoa-kiosk-override-message.is-error {
+    color: #d63638;
+}

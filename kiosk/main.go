@@ -427,48 +427,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
                                 }
                         }
 
-                case "startSessionById":
-                    if payload, ok := msg.Payload.(map[string]interface{}); ok {
-                    	if id, okID := payload["id"].(string); okID {
-                                log.Printf("KIOSK DEBUG: 'startSessionById' event received. Triggering validation for ID %s.", id)
-                            go func() {
-                                var finalMessage SocketMessage
-                                vResponse, err := validateCardholderByID(id)
-                                if err == nil {
-                                    rfid, _ := vResponse.Cardholder.(map[string]interface{})["rfid"].(string)
-                                    finalPayload := map[string]interface{}{
-                                        "isValid":    vResponse.IsValid,
-                                        "message":    vResponse.Message,
-                                        "cardholder": vResponse.Cardholder,
-                                        "rfid":       rfid,
-                                    }
-                                    // Send only to the originating client 'ws'
-                                    finalMessage = SocketMessage{Event: "cardSwiped", Payload: finalPayload}
-                                    clientsMutex.Lock()
-                                    if err := ws.WriteJSON(finalMessage); err != nil {
-                                         log.Printf("Error sending startSessionById result to client: %v", err)
-                                    }
-                                    clientsMutex.Unlock()
-                                } else {
-                                    log.Printf("Error validating cardholder by ID %s: %v", id, err)
-
-                                    // Construct a failure payload similar to a failed swipe
-                                    errorPayload := map[string]interface{}{
-                                        "isValid": false,
-                                        // Use the message from the PHP response if available, otherwise use a generic message
-                                        "message": "Error validating cardholder. Please try swiping.",
-                                    }
-                                    // It's possible vResponse has the error message even if err is not nil
-                                    if vResponse.Message != "" {
-                                        errorPayload["message"] = vResponse.Message
-                                    }
-
-                                    finalMessage = SocketMessage{Event: "cardSwiped", Payload: errorPayload}
-                                }
-                            }()
-                    	}
-                    }
-
 		case "manualSwipe":
 			if payload, ok := msg.Payload.(map[string]interface{}); ok {
 				if rfid, okR := payload["rfid"].(string); okR {
@@ -487,41 +445,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-// This helper function validates a cardholder by their primary ID against WordPress.
-// Used when signing in via a WordPress originated request.
-func validateCardholderByID(id string) (ValidationResponse, error) {
-    var vResponse ValidationResponse
-    validationURL := fmt.Sprintf("%s/wp-json/fsbhoa/v1/kiosk/cardholder/%s", config.WordPressAPIBaseURL, id)
-    req, err := http.NewRequest("GET", validationURL, nil)
-    if err != nil {
-        log.Printf("Error creating validation request for ID %s: %v", id, err)
-        return vResponse, err
-    }
-
-    req.Header.Set("X-API-KEY", config.APIKey)
-    httpClient := &http.Client{Timeout: 5 * time.Second}
-    resp, err := httpClient.Do(req)
-    if err != nil {
-        log.Printf("Network error validating ID %s: %v", id, err)
-        return vResponse, err
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode != http.StatusOK {
-        bodyBytes, _ := io.ReadAll(resp.Body)
-        log.Printf("Non-200 status for ID %s: %s - %s", id, resp.Status, string(bodyBytes))
-        return vResponse, fmt.Errorf("bad status: %s", resp.Status)
-    }
-
-    if err := json.NewDecoder(resp.Body).Decode(&vResponse); err != nil {
-        log.Printf("Error decoding validation response for ID %s: %v", id, err)
-        return vResponse, err
-    }
-
-    return vResponse, nil
-}
-
 
 // apiProxyHandler  acts as a bridge between the Kiosk JS and the WordPress API.
 // Allowed paths that the frontend is permitted to request via the proxy.

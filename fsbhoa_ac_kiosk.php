@@ -11,6 +11,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Fsbhoa_AC_Kiosk {
 
+    // Serial of the kiosk's virtual controller. Other plugins also create VIRTUAL_KIOSK
+    // controllers (e.g. 900001 for QR scans), so always match on this serial, not the type alone.
+    const VIRTUAL_CONTROLLER_SERIAL = 900000;
+
     private static $instance = null;
     private $settings_page = null; // Store settings instance
 
@@ -24,8 +28,6 @@ class Fsbhoa_AC_Kiosk {
     private function __construct() {
         // Wait for Core to load first
         add_action( 'plugins_loaded', array( $this, 'init_plugin' ) );
-
-        add_action( 'admin_post_fsbhoa_delete_kiosk_station', array( $this, 'handle_delete_kiosk_station' ) );
     }
 
     public function init_plugin() {
@@ -46,6 +48,7 @@ class Fsbhoa_AC_Kiosk {
         require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-rest-api.php';
         require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-settings.php';
         require_once plugin_dir_path( __FILE__ ) . 'includes/admin/class-fsbhoa-kiosk-stations-page.php';
+        require_once plugin_dir_path( __FILE__ ) . 'includes/class-fsbhoa-kiosk-admin-override.php';
     }
 
     private function instantiate_classes() {
@@ -58,13 +61,16 @@ class Fsbhoa_AC_Kiosk {
             $this->settings_page = new Fsbhoa_Kiosk_Settings();
         }
 
-        // 3. Inject Kiosk Service into Core's System Status page
+        // 3. Admin Override sign-in on the cardholder list (front-end page and AJAX)
+        new Fsbhoa_Kiosk_Admin_Override();
+
+        // 4. Inject Kiosk Service into Core's System Status page
         add_filter( 'fsbhoa_system_services', function( $services ) {
             $services['fsbhoa_kiosk'] = 'Kiosk Service';
             return $services;
         });
 
-        // 4. Register Admin Menus
+        // 5. Register Admin Menus
         add_action( 'admin_menu', array( $this, 'register_admin_menus' ) );
     }
 
@@ -105,14 +111,15 @@ class Fsbhoa_AC_Kiosk {
 
         // 1. Check if the VIRTUAL_KIOSK controller already exists (matching 900000)
         $controller_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT controller_record_id FROM {$controllers_table} WHERE type = %s LIMIT 1",
-            'VIRTUAL_KIOSK'
+            "SELECT controller_record_id FROM {$controllers_table} WHERE type = %s AND uhppoted_device_id = %d LIMIT 1",
+            'VIRTUAL_KIOSK',
+            self::VIRTUAL_CONTROLLER_SERIAL
         ) );
 
         // If not, create it
         if ( ! $controller_id ) {
             $wpdb->insert( $controllers_table, [
-                'uhppoted_device_id' => 900000,
+                'uhppoted_device_id' => self::VIRTUAL_CONTROLLER_SERIAL,
                 'friendly_name'      => 'Virtual Kiosk Controller',
                 'notes'              => 'Auto-seeded by Kiosk module for virtual check-ins.',
                 'type'               => 'VIRTUAL_KIOSK',
@@ -137,49 +144,6 @@ class Fsbhoa_AC_Kiosk {
         }
     }
 
-
-    public function handle_delete_kiosk_station() {
-        global $wpdb;
-
-        $controller_id = isset( $_GET['controller_id'] ) ? absint( $_GET['controller_id'] ) : 0;
-        if ( ! $controller_id ) {
-            wp_die( 'Invalid kiosk station ID specified.', 'Error', ['back_link' => true] );
-        }
-
-        check_admin_referer( 'fsbhoa_delete_kiosk_' . $controller_id );
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( 'You do not have permission to delete this kiosk station.' );
-        }
-
-        // Verify it is indeed a virtual kiosk controller
-        $kiosk = $wpdb->get_row( $wpdb->prepare(
-            "SELECT * FROM ac_controllers WHERE controller_record_id = %d AND type = 'VIRTUAL_KIOSK'",
-            $controller_id
-        ) );
-
-        if ( ! $kiosk ) {
-            wp_die( 'Kiosk station not found or is not a virtual kiosk.', 'Error', ['back_link' => true] );
-        }
-
-        $wpdb->query( 'START TRANSACTION' );
-
-        // Deleting the controller will cascade-delete its associated doors in ac_doors
-        // because of the foreign key constraint ON DELETE CASCADE.
-        $deleted = $wpdb->delete( 'ac_controllers', [ 'controller_record_id' => $controller_id ], [ '%d' ] );
-
-        if ( false === $deleted ) {
-            $wpdb->query( 'ROLLBACK' );
-            wp_die( 'Database error while deleting the kiosk station. DB Error: ' . esc_html( $wpdb->last_error ), 'Error', ['back_link' => true] );
-        }
-
-        $wpdb->query( 'COMMIT' );
-
-        // Redirect back to the Kiosk Stations page with a success message
-        $redirect_url = remove_query_arg( [ 'action', 'controller_id', '_wpnonce' ], wp_get_referer() );
-        $redirect_url = add_query_arg( 'message', 'kiosk_deleted', $redirect_url );
-        wp_safe_redirect( $redirect_url );
-        exit;
-    } 
 }
 
 // Start the plugin

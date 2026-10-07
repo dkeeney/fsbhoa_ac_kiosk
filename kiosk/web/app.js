@@ -25,8 +25,6 @@ let lastSwipedCard = null;
 let socket = null;
 let audioCtx;
 let hasConnectedBefore = false;
-let isDirectLoad = false;
-let overrideDoorNumber = null;
 let rfidBuffer = "";
 
 // Gesture Variables
@@ -42,12 +40,6 @@ async function initializeKiosk() {
 
     if (urlParams.has('v')) {
         logToScreen(`SYSTEM: Hard Refresh detected. Build: ${urlParams.get('v')}`);
-    }
-
-    if (urlParams.has('cardholder_id') && urlParams.has('door_number')) {
-        logToScreen("Step 1: Direct Load parameters detected.");
-        await handleDirectLoad(urlParams);
-        return;
     }
 
     if (urlParams.has('reset_kiosk')) {
@@ -85,22 +77,6 @@ async function initializeKiosk() {
 
     logToScreen("Step 5: No identity found. Showing setup screen.");
     showSetupScreen();
-}
-
-async function handleDirectLoad(params) {
-    const doorNum = params.get('door_number');
-    const cardId = params.get('cardholder_id');
-    kioskIdentity = {
-        id: parseInt(doorNum, 10),
-        name: "Direct Load Session",
-        serial: "000000",
-        door: 1
-    };
-    overrideDoorNumber = kioskIdentity.id;
-    logToScreen(`Direct Load: Cardholder ${cardId} at Gate ${doorNum}`);
-    document.getElementById('setup-screen').style.display = 'none';
-    document.getElementById('idle-screen').style.display = 'block';
-    connect();
 }
 
 async function handleAutoConfig(gateName) {
@@ -227,25 +203,6 @@ function connect() {
             hasConnectedBefore = true;
             resetKiosk();
         }
-        const urlParams = new URLSearchParams(window.location.search);
-        const cardholderId = urlParams.get('cardholder_id');
-        const doorNumberParam = urlParams.get('door_number');
-        const doorNumber = doorNumberParam ? parseInt(doorNumberParam, 10) : 0;
-
-        if (cardholderId) {
-            isDirectLoad = true;
-            const payload = { id: cardholderId };
-            if (overrideDoorNumber !== null) {
-                payload.door_number = overrideDoorNumber;
-            }
-            logToScreen(`Direct load requested for cardholder ID: ${cardholderId}, Door: ${doorNumber}`);
-            socket.send(JSON.stringify({
-                event: 'startSessionById',
-                payload: payload
-            }));
-        } else {
-            isDirectLoad = false;
-        }
     });
 
     socket.addEventListener('message', (event) => {
@@ -366,7 +323,6 @@ function createAmenityButtons(amenities) {
                 finalDoorNumber = kioskIdentity.door;
                 finalSerial = kioskIdentity.serial;
             }
-            if (overrideDoorNumber !== null) finalDoorNumber = overrideDoorNumber;
             try {
                 const messageToSend = {
                     event: 'amenitySelected',
@@ -425,11 +381,6 @@ function handleIdleTimeout() {
 }
 
 function resetKiosk() {
-    if (isDirectLoad) {
-        isDirectLoad = false;
-        window.close();
-        return;
-    }
     clearTimeout(idleTimeout);
     clearTimeout(resetKioskTimer);
     splashScreen.style.display = 'none';

@@ -9,16 +9,19 @@ class Fsbhoa_Kiosk_Stations_Page {
         // Clean the current URL of any action parameters so forms submit cleanly
         $current_page_url = remove_query_arg( [ 'action', 'station_id', '_wpnonce' ] );
 
+        // Only doors on the kiosk's own virtual controller are kiosk stations. Other
+        // VIRTUAL_KIOSK controllers (e.g. 900001 for QR scans) belong to other plugins.
+        $controller_id = (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT controller_record_id FROM ac_controllers WHERE type = %s AND uhppoted_device_id = %d LIMIT 1",
+            'VIRTUAL_KIOSK',
+            Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL
+        ) );
+
         // 1. Handle form submission for ADDING a new kiosk station
         // Specifically look for 'fsbhoa_add_nonce' to avoid collisions
         if ( isset( $_POST['submit_kiosk'] ) && check_admin_referer( 'fsbhoa_save_kiosk_station', 'fsbhoa_add_nonce' ) ) {
             $kiosk_name  = sanitize_text_field( $_POST['kiosk_friendly_name'] );
             $kiosk_notes = isset( $_POST['kiosk_notes'] ) ? sanitize_textarea_field( $_POST['kiosk_notes'] ) : '';
-
-            $controller_id = $wpdb->get_var( $wpdb->prepare(
-                "SELECT controller_record_id FROM ac_controllers WHERE type = %s LIMIT 1",
-                'VIRTUAL_KIOSK'
-            ) );
 
             if ( $controller_id && ! empty( $kiosk_name ) ) {
                 $max_door_num = $wpdb->get_var( $wpdb->prepare(
@@ -54,7 +57,7 @@ class Fsbhoa_Kiosk_Stations_Page {
                 $updated = $wpdb->update( 'ac_doors', [
                     'friendly_name' => $kiosk_name,
                     'notes'         => $kiosk_notes,
-                ], [ 'door_record_id' => $station_id ], [ '%s', '%s' ], [ '%d' ] );
+                ], [ 'door_record_id' => $station_id, 'controller_record_id' => $controller_id ], [ '%s', '%s' ], [ '%d', '%d' ] );
 
                 if ( false !== $updated ) {
                     echo '<div class="updated"><p>Kiosk station updated successfully.</p></div>';
@@ -71,8 +74,9 @@ class Fsbhoa_Kiosk_Stations_Page {
             
             if ( check_admin_referer( 'fsbhoa_delete_station_' . $station_id ) ) {
                 $station_info = $wpdb->get_row( $wpdb->prepare( 
-                    "SELECT d.*, c.uhppoted_device_id FROM ac_doors d JOIN ac_controllers c ON d.controller_record_id = c.controller_record_id WHERE d.door_record_id = %d", 
-                    $station_id 
+                    "SELECT d.*, c.uhppoted_device_id FROM ac_doors d JOIN ac_controllers c ON d.controller_record_id = c.controller_record_id WHERE d.door_record_id = %d AND d.controller_record_id = %d", 
+                    $station_id,
+                    $controller_id
                 ));
 
                 $has_logs = false;
@@ -85,10 +89,12 @@ class Fsbhoa_Kiosk_Stations_Page {
                     $has_logs = ( $log_count > 0 );
                 }
 
-                if ( $has_logs ) {
+                if ( ! $station_info ) {
+                    echo '<div class="error"><p>Kiosk station not found.</p></div>';
+                } elseif ( $has_logs ) {
                     echo '<div class="notice notice-error"><p><strong>Cannot Delete Station:</strong> This kiosk station has historical access logs associated with it. Retaining the record preserves your community audit trail.</p></div>';
                 } else {
-                    $deleted = $wpdb->delete( 'ac_doors', [ 'door_record_id' => $station_id ], [ '%d' ] );
+                    $deleted = $wpdb->delete( 'ac_doors', [ 'door_record_id' => $station_id, 'controller_record_id' => $controller_id ], [ '%d', '%d' ] );
                     if ( false !== $deleted && $deleted > 0 ) {
                         echo '<div class="updated"><p>Kiosk station deleted successfully.</p></div>';
                     } else {
@@ -101,7 +107,7 @@ class Fsbhoa_Kiosk_Stations_Page {
         // --- RENDER EDIT VIEW ---
         if ( isset( $_GET['action'] ) && $_GET['action'] === 'edit_station' && isset( $_GET['station_id'] ) ) {
             $station_id = absint( $_GET['station_id'] );
-            $station = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM ac_doors WHERE door_record_id = %d", $station_id ) );
+            $station = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM ac_doors WHERE door_record_id = %d AND controller_record_id = %d", $station_id, $controller_id ) );
             
             if ( $station ) {
                 ?>
@@ -140,12 +146,11 @@ class Fsbhoa_Kiosk_Stations_Page {
         }
 
         // --- RENDER DEFAULT LIST VIEW ---
-        $stations = $wpdb->get_results( "
+        $stations = $wpdb->get_results( $wpdb->prepare( "
             SELECT d.* FROM ac_doors d
-            JOIN ac_controllers c ON d.controller_record_id = c.controller_record_id
-            WHERE c.type = 'VIRTUAL_KIOSK'
+            WHERE d.controller_record_id = %d
             ORDER BY d.door_number_on_controller ASC
-        " );
+        ", $controller_id ) );
         ?>
         <div class="wrap">
             <h1>Kiosk Stations</h1>
