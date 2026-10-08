@@ -20,6 +20,18 @@ class Fsbhoa_Kiosk_Admin_Override {
         add_action( 'fsbhoa_cardholder_list_action_icons', array( $this, 'render_action_icon' ) );
         add_action( 'fsbhoa_enqueue_cardholder_assets', array( $this, 'enqueue_assets' ) );
         add_action( 'wp_ajax_fsbhoa_kiosk_admin_signin', array( $this, 'ajax_admin_signin' ) );
+        add_filter( 'fsbhoa_monitor_map_gates', array( $this, 'hide_from_map' ) );
+    }
+
+    /**
+     * Removes the Admin Override station from core's gate map. It has no physical
+     * location: it is whichever browser staff use for the sign-in.
+     */
+    public function hide_from_map( $gates ) {
+        return array_filter( $gates, function ( $gate ) {
+            return ! ( (int) $gate['uhppoted_device_id'] === Fsbhoa_AC_Kiosk::VIRTUAL_CONTROLLER_SERIAL
+                && (int) $gate['door_number_on_controller'] === self::STATION_DOOR_NUMBER );
+        } );
     }
 
     /**
