@@ -125,7 +125,9 @@ class Fsbhoa_Kiosk_Admin_Override {
         if ( ! $badge ) {
             wp_send_json_error( 'Cardholder is not active or has no active badge.', 400 );
         }
-        if ( ! empty( $badge->expiration_date ) && strtotime( $badge->expiration_date ) < current_time( 'timestamp' ) ) {
+        // Valid through the expiry date, like the UHPPOTE controller's "To" date
+        $expiry = substr( (string) $badge->expiration_date, 0, 10 );
+        if ( $expiry !== '' && $expiry !== '0000-00-00' && $expiry < current_time( 'Y-m-d' ) ) {
             wp_send_json_error( 'Badge has expired.', 400 );
         }
 

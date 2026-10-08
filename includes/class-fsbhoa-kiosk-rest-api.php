@@ -257,7 +257,9 @@ class Fsbhoa_Kiosk_REST_API {
         } elseif ($cardholder->credential_status !== 'active') {
             $is_valid = false;
             $message = 'Card is not active.';
-        } elseif (!empty($cardholder->card_expiry_date) && strtotime($cardholder->card_expiry_date) < current_time('timestamp')) {
+        } elseif (!empty($cardholder->card_expiry_date) && substr($cardholder->card_expiry_date, 0, 10) !== '0000-00-00'
+                  && substr($cardholder->card_expiry_date, 0, 10) < current_time('Y-m-d')) {
+            // Valid through the expiry date, like the UHPPOTE controller's "To" date
             $is_valid = false;
             $message = 'Card has expired.';
         }
