@@ -126,12 +126,12 @@ class Fsbhoa_Kiosk_Regression_Test {
     }
 
     /**
-     * Calls a kiosk REST endpoint with the kiosk API key. Returns the decoded body or a WP_Error.
+     * Calls a kiosk REST endpoint with the Access Verification API Key. Returns the decoded body or a WP_Error.
      */
     private function call_api( $method, $path, $body = null ) {
-        $api_key = get_option( 'fsbhoa_ac_kiosk_api_key', '' );
+        $api_key = get_option( 'fsbhoa_ac_verify_api_key', '' );
         if ( empty( $api_key ) ) {
-            return new WP_Error( 'no_key', 'Kiosk API key is not configured (Kiosk Settings).' );
+            return new WP_Error( 'no_key', 'Access Verification API Key is not configured (FSBHOA AC General Settings).' );
         }
 
         $args = [

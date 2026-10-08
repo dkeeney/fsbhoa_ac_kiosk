@@ -11,7 +11,6 @@ class Fsbhoa_Kiosk_Settings {
         
         // AJAX handlers for saving and generating keys
         add_action( 'wp_ajax_fsbhoa_save_kiosk_settings', array( $this, 'ajax_save_kiosk_settings' ) );
-        add_action( 'wp_ajax_fsbhoa_generate_kiosk_api_key', array( $this, 'ajax_generate_api_key' ) );
         
         // Re-generate config if a user saves settings on this specific page
         add_action( 'update_option', array( $this, 'trigger_config_update_on_save' ), 10, 3 );
@@ -49,12 +48,6 @@ class Fsbhoa_Kiosk_Settings {
             'id' => 'fsbhoa_kiosk_port', 'type' => 'number', 'default' => 8080, 'desc' => 'The port the kiosk service listens on for secure HTTPS connections.'
         ]);
         register_setting($kiosk_option_group, 'fsbhoa_kiosk_port', 'absint');
-
-        // API Key
-        add_settings_field('fsbhoa_ac_kiosk_api_key_field', 'Kiosk API Key', array($this, 'render_api_key_field'), $kiosk_page_slug, 'fsbhoa_ac_kiosk_logo_section', [
-            'id' => 'fsbhoa_ac_kiosk_api_key', 'desc' => 'Secret key used by the Kiosk service to authorize with WordPress.'
-        ]);
-        register_setting($kiosk_option_group, 'fsbhoa_ac_kiosk_api_key', 'sanitize_text_field');
 
         // Log File
         add_settings_field('fsbhoa_kiosk_log_file_field', 'Kiosk Log File Path', array($this, 'render_field_callback'), $kiosk_page_slug, 'fsbhoa_ac_kiosk_logo_section', [
@@ -122,17 +115,6 @@ class Fsbhoa_Kiosk_Settings {
         <?php
     }
 
-    public function render_api_key_field($args) {
-        $id    = $args['id'];
-        $desc  = $args['desc'] ?? '';
-        $value = get_option($id, '');
-        ?>
-        <input type="text" name="<?php echo esc_attr($id); ?>" id="<?php echo esc_attr($id); ?>" value="<?php echo esc_attr($value); ?>" class="regular-text" readonly="readonly" placeholder="Click generate to create a new key" />
-        <button type="button" class="button" id="fsbhoa-generate-kiosk-api-key-button">Generate New Key</button>
-        <p class="description"><?php echo esc_html($desc); ?></p>
-        <?php
-    }
-
     public function render_kiosk_settings_page() {
         ?>
         <div class="wrap" id="fsbhoa-kiosk-settings-page">
@@ -155,7 +137,6 @@ class Fsbhoa_Kiosk_Settings {
             wp_localize_script('fsbhoa-kiosk-settings-js', 'fsbhoa_kiosk_vars', array(
                 'ajax_url'    => admin_url('admin-ajax.php'),
                 'nonce'       => wp_create_nonce('fsbhoa_kiosk_settings_nonce'),
-                'key_nonce'   => wp_create_nonce('fsbhoa_generate_kiosk_key_nonce')
             ));
         }
     }
@@ -169,7 +150,6 @@ class Fsbhoa_Kiosk_Settings {
             'fsbhoa_kiosk_logo_url'   => 'esc_url_raw',
             'fsbhoa_kiosk_splash_url' => 'esc_url_raw',
             'fsbhoa_kiosk_port'       => 'absint',
-            'fsbhoa_ac_kiosk_api_key' => 'sanitize_text_field',
             'fsbhoa_kiosk_log_file'   => 'sanitize_text_field',
             'fsbhoa_kiosk_max_guests' => 'absint',
             'fsbhoa_kiosk_idle_timeout' => 'absint',
@@ -190,17 +170,9 @@ class Fsbhoa_Kiosk_Settings {
         wp_send_json_success('Kiosk settings saved successfully.');
     }
 
-    public function ajax_generate_api_key() {
-        check_ajax_referer('fsbhoa_generate_kiosk_key_nonce', 'nonce');
-        if (!current_user_can('manage_options')) { wp_send_json_error('Permission denied.', 403); }
-
-        $new_key = base64_encode(random_bytes(32));
-        wp_send_json_success(['api_key' => $new_key]);
-    }
-
     public function trigger_config_update_on_save($option_name, $old_value, $new_value) {
         $kiosk_options = [
-            'fsbhoa_kiosk_logo_url', 'fsbhoa_kiosk_port', 'fsbhoa_kiosk_log_file', 'fsbhoa_ac_kiosk_api_key'
+            'fsbhoa_kiosk_logo_url', 'fsbhoa_kiosk_port', 'fsbhoa_kiosk_log_file'
         ];
         if (in_array($option_name, $kiosk_options)) {
             $this->update_kiosk_service_config();
@@ -233,7 +205,9 @@ class Fsbhoa_Kiosk_Settings {
         
         $kiosk_config = [
             'wordpress_api_base_url' => get_site_url(),
-            'api_key'                => get_option('fsbhoa_ac_kiosk_api_key', ''),
+            // The one key for services calling WordPress: Access Verification API Key (core General settings).
+            // Saving the General settings rewrites this file (fsbhoa_update_service_configs).
+            'api_key'                => get_option('fsbhoa_ac_verify_api_key', ''),
             'ssl_cert_path'          => sanitize_text_field($tls_cert_path),
             'ssl_key_path'           => sanitize_text_field($tls_key_path),
             'port'                   => ':' . absint($kiosk_port),

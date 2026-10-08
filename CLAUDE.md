@@ -45,7 +45,7 @@ Core's access service (`Fsbhoa_Access_Service::process_amenity_logic`) combines 
   - Runs a websocket at `/ws`.
   - Reads `/var/lib/fsbhoa/kiosk.json`, which Kiosk Settings generates.
   - Logs to journald (`journalctl -u fsbhoa_kiosk`) because `log_file` is blank.
-- **REST endpoints** (`includes/class-fsbhoa-kiosk-rest-api.php`), all requiring the kiosk API key:
+- **REST endpoints** (`includes/class-fsbhoa-kiosk-rest-api.php`), all requiring the Access Verification API Key from core's General settings (`X-API-KEY`, checked by `Fsbhoa_Verification_REST_API::api_key_permission_check`; the kiosk no longer has its own key, and `kiosk.json` gets the core key when settings are saved):
 
   | Endpoint | Returns or does |
   |---|---|

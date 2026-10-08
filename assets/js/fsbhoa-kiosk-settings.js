@@ -35,25 +35,6 @@ jQuery(document).ready(function($) {
         });
     });
 
-    // Handle API Key Generation
-    $('#fsbhoa-generate-kiosk-api-key-button').on('click', function(e) {
-        e.preventDefault();
-        if(confirm('Generating a new key will require restarting the Kiosk Go service to pick up the new key. Continue?')) {
-            $.post(fsbhoa_kiosk_vars.ajax_url, {
-                action: 'fsbhoa_generate_kiosk_api_key',
-                nonce: fsbhoa_kiosk_vars.key_nonce
-            }, function(response) {
-                if (response.success) {
-                    $('#fsbhoa_ac_kiosk_api_key').val(response.data.api_key);
-                    // Trigger a save automatically
-                    $('#fsbhoa-save-kiosk-settings-button').trigger('click');
-                } else {
-                    alert('Failed to generate key: ' + response.data);
-                }
-            });
-        }
-    });
-
     // Handle Media Uploader for Image fields
     var mediaUploader;
     $('#fsbhoa_kiosk_logo_url-button, #fsbhoa_kiosk_splash_url-button').on('click', function(e) {

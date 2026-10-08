@@ -14,47 +14,27 @@ class Fsbhoa_Kiosk_REST_API {
         register_rest_route( $this->namespace, '/kiosk/config', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_kiosk_config_callback' ),
-            'permission_callback' => array( $this, 'api_key_permission_check' ),
+            'permission_callback' => array( 'Fsbhoa_Verification_REST_API', 'api_key_permission_check' ),
         ) );
 
         register_rest_route( $this->namespace, '/kiosk/log-signin', array(
             'methods'             => 'POST',
             'callback'            => array( $this, 'log_signin_callback' ),
-            'permission_callback' => array( $this, 'api_key_permission_check' ),
+            'permission_callback' => array( 'Fsbhoa_Verification_REST_API', 'api_key_permission_check' ),
         ) );
 
         register_rest_route( $this->namespace, '/kiosk/validate-card/(?P<rfid>\d+)', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'validate_card_callback' ),
-            'permission_callback' => array( $this, 'api_key_permission_check' ),
+            'permission_callback' => array( 'Fsbhoa_Verification_REST_API', 'api_key_permission_check' ),
         ) );
 
         register_rest_route( $this->namespace, '/kiosk/station', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_station_callback' ),
-            'permission_callback' => array( $this, 'api_key_permission_check' ),
+            'permission_callback' => array( 'Fsbhoa_Verification_REST_API', 'api_key_permission_check' ),
         ) );
     }
-    /**
-     * Security check for the Kiosk API endpoint.
-     * Verifies that a valid API key is provided in the request headers.
-     */
-    public function api_key_permission_check( WP_REST_Request $request ) {
-        $provided_key = $request->get_header('X-API-KEY');
-        if (empty($provided_key)) {
-            return new WP_Error('rest_forbidden', 'API Key is missing.', ['status' => 401]);
-        }
-
-        // We will store the valid Kiosk API key in WordPress options.
-        $stored_key = get_option('fsbhoa_ac_kiosk_api_key', ''); 
-
-        if (empty($stored_key) || !hash_equals($stored_key, $provided_key)) {
-            return new WP_Error('rest_forbidden', 'Invalid API Key.', ['status' => 403]);
-        }
-
-        return true;
-    }
-
     /**
      * Returns the kiosk configuration: logo URL and active amenities.
      */
