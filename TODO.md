@@ -16,7 +16,9 @@
     - [x] Kiosk page: removed the setup screen, `?auto_name=`, `?reset_kiosk` and the stored identity. Shows a "not registered" message with the device's IP and checks again every 30 seconds.
     - [x] `start_kiosk.sh`: no longer passes `?auto_name=LobbyKiosk`.
     - [x] Installed on the testbed and tested. Home PC over VPN (192.168.70.3, station TestbedKiosk) swiped and signed in to Cafe; shown on the monitor and in the access log. An unregistered address (127.0.0.1) gets `notRegistered`; a websocket from another site's page is refused (HTTP 403).
-    - [ ] Not yet tested: the per-connection rate limit, and a kiosk browser running on the testbed machine itself (no monitor attached to the testbed Pi yet).
+    - [x] Rate limit tested 2026-10-14 from the home PC's kiosk page, sending `manualSwipe` from the browser console (the page stops reading the card reader while a cardholder is on screen, so real swipes can't reach the limit). 11 single-card scans: 10 looked up, the 11th refused with "Too many attempts" and `SECURITY: Rate limit hit`. 7 cards within 400 ms: one scan, 5 looked up and logged as denied, the rest dropped.
+    - Wallet scans: the FisaiD M303 outputs only one card when several are in the field (it picks the card furthest from the reader, even an invalid one; tested with a stack of 5, two of them valid; an RFID blocker stops the reading), so the service never gets more than one card from it. The 400 ms grouping still works for a reader that sends several.
+    - Not testable on the testbed: a kiosk browser on the testbed machine itself (`127.0.0.1`), which has no screen. It is the same lookup by address with a different IP. Check it on production or the dedicated Pi.
   - **Deployment order for production:** run the `migration.sql` STEP 6 column change and register the lobby kiosk's IP on the Kiosk Stations page *before* installing the new kiosk service, or the lobby kiosk will be refused.
   - On the testbed, `testbed.fsbhoa.com` resolves to `127.0.0.1` (`/etc/hosts`), so a kiosk browser on the testbed machine itself connects from `127.0.0.1`. Check what address the production kiosk browser connects from before registering it (`ss -tn state established '( sport = :8080 )'`).
   - A testbed refresh copies `ac_doors` from production, which replaces the testbed's station IPs. Re-register testbed stations (e.g. the home PC) after a refresh.
@@ -32,7 +34,7 @@
     - [x] Test the dialog in the browser on the testbed. Passed 2026-10-07: logged as `900000` slot 0, "Amenity: Library"; shown on the monitor and in the access log.
     - [x] Install the rebuilt Go service (`./rebuild.sh install`). Done 2026-10-07.
     - [x] Follow-up: the Admin Override station appeared in the kiosk setup screen's gate list. Gone with #1 (setup screen removed; slot 0 has no IP so no browser can connect as it).
-    - [ ] Follow-up: usage analytics label every `900000` event as "Lobby Kiosk" (see #13).
+    - [x] Follow-up: usage analytics label every `900000` event as "Lobby Kiosk". Fixed in #13: reports label each station by its door name.
 - [x] **3. Kiosk hangs when direct load fails.** _Goes away with #2._ The `startSessionById` error branch builds a failure message but never sends it (`kiosk/main.go:466`).
 - [x] **4. Testbed can point at production.** `update_kiosk_service_config` falls back to `access.fsbhoa.com` when `fsbhoa_ac_wp_host` is missing. Should fail closed per `ARCHITECTURE.md`.
   - Done 2026-10-07: with no host set, it logs why and keeps the existing `kiosk.json` instead of writing one. Tested with the option blanked.
@@ -62,12 +64,12 @@
     - Database changes are manual `migration.sql` steps today; installing from zips works best if core applies them on a version change.
     - `~/deploy-production.sh` isn't in any repo and still calls `deploy_kiosk.sh` (it skips a missing script).
     - Production's desktop autostart (`~/.config/autostart/fsbhoa_kiosk.desktop`) runs `/home/pi/fsbhoa_ac/start_kiosk.sh`, the old monolithic path. Point it at the kiosk plugin's `start_kiosk.sh`.
-- [ ] **12. Housekeeping**
+- [x] **12. Housekeeping**
   - [x] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.
   - [x] Whitelist option names in `ajax_save_kiosk_settings`. Each field has its own sanitizer; unknown names are logged and ignored.
   - [x] Stop `ensure_virtual_kiosk_controller` running queries on every request. It is now a public static that the Stations page and the Admin Override call when they need the controller. It no longer recreates a "Test Kiosk" station 1, which used to come back after being deleted.
   - [x] Removed the Kiosk Display Name (`fsbhoa_kiosk_name`) setting along with core's monitor fallback (done with #8). The stored option is left in `wp_options` and is unused. (`handle_delete_kiosk_station` was removed in #14.)
-- [ ] **13. Core references the kiosk plugin (breaks core rule 1).** Changes go in `fsbhoa_ac_core`.
+- [x] **13. Core references the kiosk plugin (breaks core rule 1).** Changes go in `fsbhoa_ac_core`.
   - [x] Add a hook in the cardholder list's actions column, e.g. `do_action( 'fsbhoa_cardholder_list_action_icons', $cardholder )` (`includes/cardholder/views/view-cardholder-list.php`).
   - [x] Remove the hardcoded kiosk icon (`view-cardholder-list.php:130`), the `kiosk_url` built from `fsbhoa_kiosk_port` (`includes/class-fsbhoa-shortcodes.php:104`), and the `.fsbhoa-kiosk-signin-link` click handler (`assets/js/fsbhoa-cardholder-admin.js:355`).
   - Done 2026-10-07. Also added `do_action( 'fsbhoa_enqueue_cardholder_assets' )` in `class-fsbhoa-shortcodes.php` so extensions can load assets on the cardholder page, and listed both hooks in `ARCHITECTURE.md`.

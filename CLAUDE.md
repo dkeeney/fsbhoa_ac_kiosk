@@ -81,6 +81,7 @@ Core's access service (`Fsbhoa_Access_Service::process_amenity_logic`) combines 
 - The reader is a **FisaiD M303** USB MIFARE reader in keyboard mode, set to "2hex->3dec + 4hex->5dec". Each card types an **8-digit decimal number with leading zeros**. Badge numbers in `ac_credentials` are stored the same way.
 - The page captures keystrokes in a hidden input. A pause of 50 ms ends a card. It keeps the last 8 digits and doesn't rely on the trailing CR/LF.
 - The service treats swipes within **400 ms** as one wallet scan and uses the first valid card.
+  - The M303 outputs only one card when several are in the field: the one **furthest from the reader**, even if it is invalid (tested 2026-10-14 with a stack of 5, two of them valid). An RFID-blocking wallet or sleeve stops the reading. What to tell cardholders: take the photo ID out of the wallet, or make sure it's the card furthest from the reader.
 - Limits per connection: 5 cards per scan and 10 card lookups a minute, so card numbers can't be guessed in bulk.
 
 ## Kiosk screen
