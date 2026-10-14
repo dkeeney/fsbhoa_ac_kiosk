@@ -38,7 +38,9 @@
 - [x] **3. Kiosk hangs when direct load fails.** _Goes away with #2._ The `startSessionById` error branch builds a failure message but never sends it (`kiosk/main.go:466`).
 - [x] **4. Testbed can point at production.** `update_kiosk_service_config` falls back to `access.fsbhoa.com` when `fsbhoa_ac_wp_host` is missing. Should fail closed per `ARCHITECTURE.md`.
   - Done 2026-10-07: with no host set, it logs why and keeps the existing `kiosk.json` instead of writing one. Tested with the option blanked.
-  - [ ] Core has the same `access.fsbhoa.com` fallback in `includes/class-fsbhoa-shortcodes.php` (monitor websocket host) and `includes/admin/class-fsbhoa-ac-settings-page.php`. Raise with core.
+  - [x] Core has the same `access.fsbhoa.com` fallback in `includes/class-fsbhoa-shortcodes.php` (monitor websocket host) and `includes/admin/class-fsbhoa-ac-settings-page.php`. Raise with core.
+    - Fixed 2026-10-14 in core and in `fsbhoa_ac_uhppote`'s Event Service config, which had the same fallback (a testbed event service would have posted gate events to production's WordPress). With no host set, each logs why and keeps its existing config, and the live monitor doesn't connect ("Configuration Error"). The WordPress API Host field no longer defaults to `nas.fsbhoa.com`.
+    - **Deployment:** check `fsbhoa_ac_wp_host` is set on production (`wp option get fsbhoa_ac_wp_host`) before deploying, or the service configs stop being written.
 - [x] **5. API key written to the log** at startup (`kiosk/main.go:101`). Done 2026-10-07: logs only whether a key is present. Takes effect after `./rebuild.sh install`.
 - [x] **6. No expiration date counts as expired.** _Fixed in #1 (shared `check_card`) and in the Admin Override._ `strtotime(null) < time()` is true; `expiration_date` can be `NULL`.
 - [x] **7. Direct-load sign-ins use serial `"000000"`** instead of the virtual controller `900000` (`kiosk/web/app.js:96`). _Goes away with #2._
