@@ -82,35 +82,12 @@ A testbed refresh copies `ac_doors` from production, which replaces the testbed'
    ```bash
    ln -s /home/pi/fsbhoa_ac_kiosk /var/www/html/wp-content/plugins/fsbhoa_ac_kiosk
    ```
-2. Create the systemd unit `/etc/systemd/system/fsbhoa_kiosk.service`:
-   ```ini
-   [Unit]
-   Description=FSBHOA Kiosk Service
-   After=network.target
+2. Build and install the service, as the user it runs as. `./build.sh` only builds; `./build.sh install` also installs it in `/usr/local/bin` and its systemd unit from `systemd/fsbhoa_kiosk.service` (with that user and this folder filled in), then starts it. Until `/var/lib/fsbhoa/kiosk.json` exists (step 3 writes it) it isn't started; then run `sudo systemctl restart fsbhoa_kiosk`. On a server, `~/deploy-production.sh` (in core) does this for every plugin.
+3. In **Kiosk Settings**, set the logo, splash image, service port (8080), Max Guests, Inactivity Timeout and Inactivity Amenity, and save. This writes `/var/lib/fsbhoa/kiosk.json`.
+4. On the **Kiosk Stations** page, add a station with the kiosk browser's IP address. To see which address a browser connects from, open the kiosk page in it and read the "not registered" screen, or run `ss -tn state established '( sport = :8080 )'` on the server.
+5. On the kiosk machine, run `start_kiosk.sh` from the desktop's autostart. It starts Firefox in kiosk mode on the kiosk page when the service is up, closes it when the service is down, and restarts it when the service restarts.
 
-   [Service]
-   Type=simple
-   User=pi
-   Group=www-data
-   # The service serves the kiosk page from kiosk/web below this folder
-   WorkingDirectory=/home/pi/fsbhoa_ac_kiosk/kiosk
-   ExecStart=/usr/local/bin/fsbhoa_kiosk
-   Restart=always
-   RestartSec=5
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-   Then `sudo systemctl daemon-reload` and `sudo systemctl enable fsbhoa_kiosk`.
-3. Build and install the service. `./rebuild.sh` only builds; `./rebuild.sh install` also copies it to `/usr/local/bin` and restarts it:
-   ```bash
-   ./rebuild.sh install
-   ```
-4. In **Kiosk Settings**, set the logo, splash image, service port (8080), Max Guests, Inactivity Timeout and Inactivity Amenity, and save. This writes `/var/lib/fsbhoa/kiosk.json`.
-5. On the **Kiosk Stations** page, add a station with the kiosk browser's IP address. To see which address a browser connects from, open the kiosk page in it and read the "not registered" screen, or run `ss -tn state established '( sport = :8080 )'` on the server.
-6. On the kiosk machine, run `start_kiosk.sh` from the desktop's autostart. It starts Firefox in kiosk mode on the kiosk page when the service is up, closes it when the service is down, and restarts it when the service restarts.
-
-The service logs to journald: `journalctl -u fsbhoa_kiosk`. PHP and JavaScript changes take effect immediately; changes to the Go service need `./rebuild.sh install`.
+The service logs to journald: `journalctl -u fsbhoa_kiosk`. PHP and JavaScript changes take effect immediately; changes to the Go service need `./build.sh install`.
 
 ## Diagnostics
 

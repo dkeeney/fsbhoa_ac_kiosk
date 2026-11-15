@@ -1,0 +1,16 @@
+[Unit]
+Description=FSBHOA Kiosk Service
+After=network.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=www-data
+# The kiosk serves its web pages from the plugin folder
+WorkingDirectory=@PLUGIN_DIR@/kiosk
+ExecStart=/usr/local/bin/fsbhoa_kiosk
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

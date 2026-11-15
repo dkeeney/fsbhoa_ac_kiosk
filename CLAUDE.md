@@ -105,7 +105,7 @@ The dialog records the sign-in through the access service at the Admin Override 
 
 ## Building and testing
 
-- **Build and install:** `./rebuild.sh` builds `kiosk/fsbhoa_kiosk`. `./rebuild.sh install` copies it to `/usr/local/bin` and restarts the service. PHP and JS changes are live straight away (the repo is symlinked into WordPress).
+- **Build and install:** `./build.sh` builds `kiosk/fsbhoa_kiosk`. `./build.sh install` copies it to `/usr/local/bin`, installs `systemd/fsbhoa_kiosk.service` and restarts the service (core CLAUDE.md, "Deployment"). PHP and JS changes are live straight away (the repo is symlinked into WordPress).
 - **The binary isn't committed** (`.gitignore`).
 - **Diagnostics:** core's Diagnostics page runs this plugin's checks (`includes/class-fsbhoa-kiosk-regression-test.php`, via `fsbhoa_regression_test_steps`). They check that the service answers, the config, the card check, a REST sign-in, and that it was logged at a station. They use core's System test card `22222222`.
 - **Open work and deployment notes** are in `TODO.md`. Production deployment is on hold until all the plugins are done.

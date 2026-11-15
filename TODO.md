@@ -64,7 +64,7 @@
     - The kiosk service serves its screen from its working directory (the repo). Production needs a fixed location, set in `kiosk.json`.
     - Keep production's plugin folder names (WordPress tracks active plugins by folder).
     - Database changes are manual `migration.sql` steps today; installing from zips works best if core applies them on a version change.
-    - `~/deploy-production.sh` isn't in any repo and still calls `deploy_kiosk.sh` (it skips a missing script).
+    - Done 2026-11-15: `~/deploy-production.sh` is in core and runs this plugin's `build.sh install`.
     - Production's desktop autostart (`~/.config/autostart/fsbhoa_kiosk.desktop`) runs `/home/pi/fsbhoa_ac/start_kiosk.sh`, the old monolithic path. Point it at the kiosk plugin's `start_kiosk.sh`.
 - [x] **12. Housekeeping**
   - [x] Remove the committed binary `kiosk/fsbhoa_kiosk` and add a `.gitignore`.
