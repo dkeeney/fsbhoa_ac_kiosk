@@ -89,11 +89,15 @@ Live on production V1 since 2026-11-18. Password SSH login is off
   through the screen: when the screen restarts or its cables are replugged, the touch controller
   drops off USB and comes back (cage picks it up again). If touch is dead, check `lsusb` for
   27c0:0859 and reseat the screen's USB cable.
-- **Mouse pointer:** cage/Chromium drew a pointer in the middle of the screen. A blank cursor
-  theme and ignoring the touchscreen's mouse interface (udev) did not help. Fixed with a local
-  Chromium add-on, `nocursor/` (installed to `/usr/local/share/fsbhoa-kiosk/nocursor`, loaded with
-  `--load-extension`), that sets `cursor: none` on every page. Add-ons don't run in incognito, so
-  the browser no longer uses `--incognito` (its profile is still wiped at every start).
+- **Mouse pointer:** cage draws a pointer in the middle of the screen whenever any input device
+  claims to be a mouse. Four do: the touchscreen's mouse-emulation interface, **the card reader's
+  second (mouse) interface**, and the two HDMI CEC inputs ("pointing stick"). Fixed by
+  `90-kiosk-no-pointer.rules` (udev, `LIBINPUT_IGNORE_DEVICE` for every mouse / pointing-stick
+  device; check with `ls -l /proc/$(pgrep -x cage)/fd | grep input`). Belt and braces: a local
+  Chromium add-on, `nocursor/` (`/usr/local/share/fsbhoa-kiosk/nocursor`, `--load-extension`),
+  sets `cursor: none` on every page; add-ons don't run in incognito, so no `--incognito` (the
+  profile is still wiped at every start). A blank cursor theme did not help.
+  A USB mouse plugged in for maintenance is ignored too.
 - **access:** its own kiosk browser is stopped and its desktop autostart
   (`~/.config/autostart/start_kiosk.sh.desktop`) is set to `X-GNOME-Autostart-enabled=false`.
   To go back: move the screen and reader to access, set it to `true`, and reboot access or run

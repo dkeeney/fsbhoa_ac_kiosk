@@ -25,6 +25,9 @@ for u in kiosk-browser.service kiosk-swipe-watch.service kiosk-watchdog.service 
     install -m 644 -o root -g root "$SRC/$u" /etc/systemd/system/
 done
 
+install -m 644 "$SRC/90-kiosk-no-pointer.rules" /etc/udev/rules.d/   # no mouse devices for cage
+udevadm control --reload
+udevadm trigger --subsystem-match=input --action=change
 install -d /usr/local/share/fsbhoa-kiosk/nocursor        # Chromium add-on: hide the pointer
 install -m 644 "$SRC/nocursor/manifest.json" "$SRC/nocursor/nocursor.css" /usr/local/share/fsbhoa-kiosk/nocursor/
 

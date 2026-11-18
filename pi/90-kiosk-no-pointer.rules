@@ -1,0 +1,9 @@
+# FSBHOA kiosk: the kiosk has no mouse, but several devices claim to be one, and then cage
+# draws a pointer in the middle of the screen:
+#   - the touchscreen's mouse-emulation interface (wch.cn 27c0:0859, interface 02; touch itself is interface 00)
+#   - the card reader's mouse interface (FisaiD 413d:2107, interface 01; cards come from interface 00)
+#   - the HDMI CEC remote-control inputs (vc4-hdmi-0/1, "pointing stick")
+# Tell libinput (and so cage) to ignore every mouse / pointing-stick device. Touchscreens and
+# keyboards are not affected. A real USB mouse plugged in for maintenance is ignored too.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_POINTINGSTICK}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
