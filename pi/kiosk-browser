@@ -13,18 +13,22 @@ until curl -s -o /dev/null --max-time 5 "$KIOSK_URL"; do
     sleep 5
 done
 
+# nocursor: a local add-on that sets cursor:none on every page (touch-only kiosk; cage and
+# Chromium otherwise draw a pointer in the middle of the screen). Add-ons don't run in
+# incognito, so no --incognito (the profile is wiped at every start anyway).
+# Chromium honours only the last --disable-features, so keep them in one flag.
 exec /usr/bin/chromium \
     --kiosk "$KIOSK_URL" \
     --ozone-platform=wayland \
     --user-data-dir="$PROFILE" \
-    --incognito \
+    --load-extension=/usr/local/share/fsbhoa-kiosk/nocursor \
     --noerrdialogs \
     --disable-infobars \
     --no-first-run \
     --no-default-browser-check \
     --disable-session-crashed-bubble \
     --disable-translate \
-    --disable-features=Translate,TranslateUI,MediaRouter,TouchpadOverscrollHistoryNavigation \
+    --disable-features=Translate,TranslateUI,MediaRouter,TouchpadOverscrollHistoryNavigation,DisableLoadExtensionCommandLineSwitch \
     --overscroll-history-navigation=0 \
     --disable-pinch \
     --password-store=basic \

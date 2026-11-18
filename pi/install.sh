@@ -25,6 +25,9 @@ for u in kiosk-browser.service kiosk-swipe-watch.service kiosk-watchdog.service 
     install -m 644 -o root -g root "$SRC/$u" /etc/systemd/system/
 done
 
+install -d /usr/local/share/fsbhoa-kiosk/nocursor        # Chromium add-on: hide the pointer
+install -m 644 "$SRC/nocursor/manifest.json" "$SRC/nocursor/nocursor.css" /usr/local/share/fsbhoa-kiosk/nocursor/
+
 mkdir -p /etc/fsbhoa-kiosk
 if [ ! -f /etc/fsbhoa-kiosk/kiosk.conf ]; then
     install -m 644 "$SRC/kiosk.conf.example" /etc/fsbhoa-kiosk/kiosk.conf

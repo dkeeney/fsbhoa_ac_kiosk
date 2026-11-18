@@ -85,7 +85,15 @@ Live on production V1 since 2026-11-18. Password SSH login is off
   adapter. No EDID comes through the adapter, so the Pi fell back to 1024x768. Fixed by adding
   `video=HDMI-A-1:1920x1080@60 video=HDMI-A-2:1920x1080@60` to `/boot/firmware/cmdline.txt`
   (one line; the boot partition is writable even in read-only mode).
-- **Touch:** wch.cn TouchScreen (USB 27c0:0859) works with no setup under cage.
+- **Touch:** wch.cn TouchScreen (USB 27c0:0859) works with no setup under cage. It is powered
+  through the screen: when the screen restarts or its cables are replugged, the touch controller
+  drops off USB and comes back (cage picks it up again). If touch is dead, check `lsusb` for
+  27c0:0859 and reseat the screen's USB cable.
+- **Mouse pointer:** cage/Chromium drew a pointer in the middle of the screen. A blank cursor
+  theme and ignoring the touchscreen's mouse interface (udev) did not help. Fixed with a local
+  Chromium add-on, `nocursor/` (installed to `/usr/local/share/fsbhoa-kiosk/nocursor`, loaded with
+  `--load-extension`), that sets `cursor: none` on every page. Add-ons don't run in incognito, so
+  the browser no longer uses `--incognito` (its profile is still wiped at every start).
 - **access:** its own kiosk browser is stopped and its desktop autostart
   (`~/.config/autostart/start_kiosk.sh.desktop`) is set to `X-GNOME-Autostart-enabled=false`.
   To go back: move the screen and reader to access, set it to `true`, and reboot access or run
