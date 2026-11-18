@@ -1,0 +1,23 @@
+#!/bin/bash
+# kiosk-mode - read-only SD card switch for the kiosk Pi.
+#   kiosk-mode                 show the mode now and after the next boot
+#   sudo kiosk-mode writable   switch the read-only overlay off and reboot (to change settings or install)
+#   sudo kiosk-mode readonly   switch it back on and reboot
+# Read-only = Raspberry Pi OS overlay (overlayroot=tmpfs in cmdline.txt): changes live in memory and
+# are gone after a reboot, so pulling the power can't damage the SD card.
+CMDLINE=/boot/firmware/cmdline.txt
+now()  { grep -q overlayroot=tmpfs /proc/cmdline && echo read-only || echo writable; }
+conf() { grep -q overlayroot=tmpfs $CMDLINE && echo read-only || echo writable; }
+
+case "$1" in
+    ""|status)
+        echo "SD card now: $(now); after the next boot: $(conf)" ;;
+    writable|readonly)
+        [ "$EUID" -eq 0 ] || { echo "Run with sudo."; exit 1; }
+        if [ "$1" = writable ]; then raspi-config nonint disable_overlayfs; else raspi-config nonint enable_overlayfs; fi || exit 1
+        logger -t kiosk-mode "switching to $1 (by ${SUDO_USER:-root}), rebooting"
+        echo "After the next boot: $(conf). Rebooting now..."
+        sync; systemctl reboot ;;
+    *)
+        echo "usage: kiosk-mode [status|writable|readonly]"; exit 1 ;;
+esac

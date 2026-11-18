@@ -1,0 +1,27 @@
+# /etc/fsbhoa-kiosk/kiosk.conf - settings for the lobby kiosk Pi.
+# After a change: sudo systemctl restart kiosk-browser
+
+# The page the browser shows.
+#   Testbed (V2):          https://testbed.fsbhoa.com:8080/
+#   Production V1:         https://access.fsbhoa.com:8080/?auto_name=LobbyKiosk
+#   Production V2:         https://access.fsbhoa.com:8080/
+# V2 knows the station by this Pi's IP address (register it on the Kiosk Stations page).
+# V1 knows it by auto_name.
+KIOSK_URL="https://testbed.fsbhoa.com:8080/"
+
+# Card reader (FisaiD M303, USB keyboard mode). vendor:product as lsusb shows it.
+SCANNER_ID="413d:2107"
+
+# Scanner auto-reset: during open hours, if no swipe for IDLE_MIN minutes,
+# power-cycle the reader's USB port (same as unplugging it).
+OPEN_HOUR=7
+CLOSE_HOUR=21
+IDLE_MIN=30
+
+# Browser restart: if the server answers but the page has had no live
+# connection for this many watchdog runs (1 per minute), restart the browser.
+NOCONN_RUNS=3
+
+# Name shown on Discord notices. The webhook URL itself is in
+# /etc/fsbhoa-kiosk/discord.url (root only, never on the NAS or in git).
+KIOSK_NAME="Lobby kiosk"

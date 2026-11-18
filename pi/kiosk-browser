@@ -1,0 +1,32 @@
+#!/bin/bash
+# kiosk-browser - started by kiosk-browser.service inside cage (one full-screen app, no desktop).
+# Waits until the kiosk page answers, then runs Chromium in kiosk mode on it.
+# When Chromium exits, cage exits and systemd starts it all again.
+
+. /etc/fsbhoa-kiosk/kiosk.conf
+
+PROFILE="$HOME/.cache/kiosk-chromium"
+rm -rf "$PROFILE"          # fresh profile every start: no restore bubbles, no leftovers
+
+until curl -s -o /dev/null --max-time 5 "$KIOSK_URL"; do
+    echo "waiting for $KIOSK_URL"
+    sleep 5
+done
+
+exec /usr/bin/chromium \
+    --kiosk "$KIOSK_URL" \
+    --ozone-platform=wayland \
+    --user-data-dir="$PROFILE" \
+    --incognito \
+    --noerrdialogs \
+    --disable-infobars \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-session-crashed-bubble \
+    --disable-translate \
+    --disable-features=Translate,TranslateUI,MediaRouter,TouchpadOverscrollHistoryNavigation \
+    --overscroll-history-navigation=0 \
+    --disable-pinch \
+    --password-store=basic \
+    --check-for-update-interval=31536000 \
+    --autoplay-policy=no-user-gesture-required

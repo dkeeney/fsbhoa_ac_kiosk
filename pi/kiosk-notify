@@ -1,0 +1,13 @@
+#!/bin/bash
+# kiosk-notify "message" - post a plain notice (no @everyone) to the Access Control Discord channel.
+# The webhook URL is in /etc/fsbhoa-kiosk/discord.url (root only). No file = log only.
+. /etc/fsbhoa-kiosk/kiosk.conf
+MSG="$KIOSK_NAME ($(hostname)): $*"
+logger -t kiosk-notify "$MSG"
+URL_FILE=/etc/fsbhoa-kiosk/discord.url
+[ -r "$URL_FILE" ] || exit 0
+URL=$(head -1 "$URL_FILE")
+[ -n "$URL" ] || exit 0
+jq -n --arg c "**Notice**
+$MSG" '{content: $c, username: "Lobby Kiosk"}' |
+    curl -s -o /dev/null --max-time 10 -H 'Content-Type: application/json' -d @- "$URL"

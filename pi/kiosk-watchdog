@@ -1,0 +1,109 @@
+#!/bin/bash
+# kiosk-watchdog - run every minute by kiosk-watchdog.timer (as root). Logs with tag kiosk-watchdog.
+#  1. Server up but the kiosk page has no live connection for NOCONN_RUNS runs: restart the browser.
+#  2. Card reader missing from USB: notice (once an hour).
+#  3. Open hours and no swipe for IDLE_MIN minutes: power-cycle the reader's USB port
+#     (a hung reader looks connected; resetting a working one is harmless, ~5 s).
+# Usage: kiosk-watchdog [--check] [--reset-scanner]
+#   --check          report only, change nothing
+#   --reset-scanner  power-cycle the reader now
+
+. /etc/fsbhoa-kiosk/kiosk.conf
+S=/run/fsbhoa-kiosk; mkdir -p $S
+TAG=kiosk-watchdog
+CHECK=0; FORCE_RESET=0
+for a in "$@"; do case $a in --check) CHECK=1;; --reset-scanner) FORCE_RESET=1;; esac; done
+log() { logger -t $TAG "$*"; [ -t 1 ] && echo "$*"; }
+say() { [ $CHECK -eq 1 ] && echo "$*"; }
+# notify_once KEY MINUTES MESSAGE: a Discord notice at most once per MINUTES for KEY
+notify_once() {
+    local f=$S/notified-$1 now=$(date +%s)
+    if [ -f $f ] && [ $(( now - $(cat $f) )) -lt $(( $2 * 60 )) ]; then return; fi
+    echo $now > $f; /usr/local/bin/kiosk-notify "$3"
+}
+
+# ---- 1. browser connection --------------------------------------------------
+HOSTPORT=$(echo "$KIOSK_URL" | sed -E 's|^https?://([^/?]+).*|\1|')
+HOST=${HOSTPORT%%:*}; PORT=${HOSTPORT##*:}; [ "$PORT" = "$HOST" ] && PORT=443
+IP=$(getent ahostsv4 "$HOST" | awk 'NR==1{print $1}')
+
+if curl -s -o /dev/null --max-time 5 "$KIOSK_URL"; then
+    if [ -f $S/server-down ]; then
+        log "kiosk server $HOST answers again"
+        /usr/local/bin/kiosk-notify "kiosk server $HOST answers again."
+        rm -f $S/server-down $S/notified-server
+    fi
+    CONNS=$(ss -Htn state established "( dport = :$PORT )" dst "$IP" | wc -l)
+    if [ "$CONNS" -gt 0 ]; then
+        say "page connected to $HOST:$PORT ($CONNS connection(s))"
+        echo 0 > $S/noconn
+    elif ! systemctl is-active -q kiosk-browser; then
+        say "browser service not running (systemd restarts it)"
+    else
+        N=$(( $(cat $S/noconn 2>/dev/null || echo 0) + 1 ))
+        say "no connection to $HOST:$PORT (run $N of $NOCONN_RUNS)"
+        if [ $CHECK -eq 0 ]; then
+            echo $N > $S/noconn
+            if [ $N -ge $NOCONN_RUNS ]; then
+                log "kiosk page not connected to $HOST:$PORT for $N min: restarting the browser"
+                systemctl restart kiosk-browser
+                echo 0 > $S/noconn
+                notify_once browser 30 "the kiosk page lost its connection to $HOST, so the browser was restarted."
+            fi
+        fi
+    fi
+else
+    say "kiosk server $HOST:$PORT does not answer"
+    if [ $CHECK -eq 0 ]; then
+        [ -f $S/server-down ] || { date +%s > $S/server-down; log "kiosk server $HOST does not answer"; }
+        if [ $(( $(date +%s) - $(cat $S/server-down) )) -ge 300 ]; then
+            notify_once server 60 "the kiosk server $HOST has not answered for 5+ minutes. The kiosk screen is blank until it is back."
+        fi
+    fi
+fi
+
+# ---- 2 + 3. card reader -----------------------------------------------------
+VID=${SCANNER_ID%%:*}; PID=${SCANNER_ID##*:}
+find_dev() {
+    for d in /sys/bus/usb/devices/*; do
+        [ -f "$d/idVendor" ] && [ "$(cat $d/idVendor)" = "$VID" ] && [ "$(cat $d/idProduct)" = "$PID" ] && { echo "$d"; return 0; }
+    done; return 1
+}
+DEV=$(find_dev)
+if [ -z "$DEV" ]; then
+    say "card reader $SCANNER_ID not on USB"
+    [ $CHECK -eq 0 ] && notify_once reader 60 "the card reader is not plugged in (or not seen on USB)."
+    exit 0
+fi
+rm -f $S/notified-reader
+
+if [ $FORCE_RESET -eq 0 ]; then
+    H=$(date +%-H)
+    if [ "$H" -lt $OPEN_HOUR ] || [ "$H" -ge $CLOSE_HOUR ]; then say "reader OK; outside open hours ($H)"; exit 0; fi
+    NOW=$(date +%s)
+    LAST=$(cat $S/last-swipe 2>/dev/null || echo 0)
+    BOOT=$(( NOW - $(cut -d. -f1 /proc/uptime) ))
+    [ $LAST -lt $BOOT ] && LAST=$BOOT                       # count from boot, not from never
+    if [ $(( NOW - LAST )) -lt $(( IDLE_MIN * 60 )) ]; then say "reader OK; last swipe $(( (NOW - LAST) / 60 )) min ago"; exit 0; fi
+    if [ -f $S/last-reset ] && [ $(( NOW - $(cat $S/last-reset) )) -lt $(( IDLE_MIN * 60 )) ]; then say "reset done < $IDLE_MIN min ago, waiting"; exit 0; fi
+    WHY="no swipe for ${IDLE_MIN}+ min"
+else
+    WHY="manual reset (--reset-scanner)"
+fi
+
+NAME=$(basename "$DEV")
+PORTDIR=$(ls -d "$(readlink -f "$DEV/..")"/*:1.0/*-port"${NAME##*[-.]}" 2>/dev/null | head -1)
+if [ $CHECK -eq 1 ]; then say "would reset reader at $NAME (port: ${PORTDIR:-none}): $WHY"; exit 0; fi
+
+date +%s > $S/last-reset
+if [ -n "$PORTDIR" ] && [ -w "$PORTDIR/disable" ]; then
+    log "$WHY: power-cycling reader port $(basename $PORTDIR)"
+    echo 1 > "$PORTDIR/disable"; sleep 3; echo 0 > "$PORTDIR/disable"
+else
+    log "$WHY: no port power control, re-authorizing $NAME"
+    echo 0 > "$DEV/authorized"; sleep 3; echo 1 > "$DEV/authorized"
+fi
+for i in $(seq 1 10); do sleep 1; find_dev >/dev/null && { log "reader back after reset"; exit 0; }; done
+log "ERROR: reader $SCANNER_ID did not come back after reset"
+notify_once reader 60 "the card reader did not come back after an automatic reset. Unplug it and plug it back in."
+exit 2

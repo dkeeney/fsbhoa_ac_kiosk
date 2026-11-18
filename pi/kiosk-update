@@ -1,0 +1,54 @@
+#!/bin/bash
+# kiosk-update - OS updates on a read-only kiosk Pi. Logs with tag kiosk-update.
+#   --nightly  (kiosk-update.timer, 03:00) check for updates; if there are any, leave a note on the
+#              boot partition, switch the overlay off and reboot.
+#   --apply    (kiosk-update-boot.service, at boot when the note is there) install the updates,
+#              switch the overlay back on and reboot. The note is removed first, so a failure
+#              can never loop; a failure sends a Discord notice and the Pi still goes back to read-only.
+FLAG=/boot/firmware/kiosk-update-pending
+TAG=kiosk-update
+log() { logger -t $TAG "$*"; [ -t 1 ] && echo "$*"; }
+readonly_now() { grep -q overlayroot=tmpfs /proc/cmdline; }
+apt_update() { for i in 1 2 3 4 5; do apt-get update -q >/dev/null 2>&1 && return 0; sleep 30; done; return 1; }
+export DEBIAN_FRONTEND=noninteractive
+
+case "$1" in
+--nightly)
+    if ! readonly_now; then
+        [ -f $FLAG ] && exit 0                       # an update boot is in progress
+        log "SD card is writable (maintenance mode): no automatic updates"
+        /usr/local/bin/kiosk-notify "the SD card is still writable (maintenance mode), so tonight's updates were skipped. When finished: sudo kiosk-mode readonly"
+        exit 0
+    fi
+    apt_update || { log "apt-get update failed (network?)"; exit 1; }
+    N=$(apt-get -s full-upgrade | grep -c '^Inst ')
+    if [ "$N" -eq 0 ]; then log "no updates"; exit 0; fi
+    log "$N update(s) waiting: switching to writable and rebooting to install them"
+    date +%s > $FLAG; sync
+    raspi-config nonint disable_overlayfs || { rm -f $FLAG; log "could not switch overlay off"; exit 1; }
+    systemctl reboot
+    ;;
+--apply)
+    [ -f $FLAG ] || exit 0
+    rm -f $FLAG; sync
+    if readonly_now; then log "update note found but SD card is read-only; nothing done"; exit 0; fi
+    RC=0
+    if apt_update; then
+        apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade > /tmp/kiosk-update.log 2>&1 || RC=$?
+        apt-get -y -q autoremove >/dev/null 2>&1; apt-get clean
+    else
+        RC=99
+    fi
+    if [ $RC -eq 0 ]; then
+        log "updates installed: $(grep -c '^Setting up' /tmp/kiosk-update.log) package(s)"
+    else
+        log "update FAILED (code $RC); last lines: $(tail -3 /tmp/kiosk-update.log 2>/dev/null | tr '\n' ' ')"
+        /usr/local/bin/kiosk-notify "the nightly OS update failed (code $RC). The kiosk goes back to read-only and will try again tomorrow night."
+    fi
+    raspi-config nonint enable_overlayfs || /usr/local/bin/kiosk-notify "could not switch the SD card back to read-only after updates. Check: sudo kiosk-mode"
+    log "switching back to read-only, rebooting"
+    sync; systemctl reboot
+    ;;
+*)
+    echo "usage: kiosk-update --nightly | --apply"; exit 1 ;;
+esac

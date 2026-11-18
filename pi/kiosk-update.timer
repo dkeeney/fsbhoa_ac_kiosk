@@ -1,0 +1,9 @@
+[Unit]
+Description=FSBHOA kiosk: check for OS updates at 3:00 every night
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

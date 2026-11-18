@@ -1,0 +1,10 @@
+[Unit]
+Description=FSBHOA kiosk: note card reader activity (no card numbers)
+
+[Service]
+ExecStart=/usr/local/bin/kiosk-swipe-watch
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

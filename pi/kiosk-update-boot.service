@@ -1,0 +1,13 @@
+[Unit]
+Description=FSBHOA kiosk: install waiting OS updates, then back to read-only
+ConditionPathExists=/boot/firmware/kiosk-update-pending
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kiosk-update --apply
+TimeoutStartSec=2h
+
+[Install]
+WantedBy=multi-user.target

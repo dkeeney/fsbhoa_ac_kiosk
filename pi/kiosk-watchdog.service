@@ -1,0 +1,6 @@
+[Unit]
+Description=FSBHOA kiosk watchdog (browser connection, card reader)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kiosk-watchdog
