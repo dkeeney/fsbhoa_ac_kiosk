@@ -16,7 +16,7 @@ SCANNER_ID="413d:2107"
 # power-cycle the reader's USB port (same as unplugging it).
 OPEN_HOUR=7
 CLOSE_HOUR=21
-IDLE_MIN=30
+IDLE_MIN=10
 
 # Browser restart: if the server answers but the page has had no live
 # connection for this many watchdog runs (1 per minute), restart the browser.
