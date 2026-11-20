@@ -14,7 +14,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 
 echo "--- packages"
 apt-get update -q
-DEBIAN_FRONTEND=noninteractive apt-get install -y -q cage chromium python3-evdev jq curl fonts-dejavu-core overlayroot
+DEBIAN_FRONTEND=noninteractive apt-get install -y -q cage chromium python3-evdev jq curl fonts-dejavu-core overlayroot uhubctl
 
 echo "--- scripts and units"
 for f in kiosk-browser kiosk-swipe-watch kiosk-watchdog kiosk-notify kiosk-mode kiosk-update; do

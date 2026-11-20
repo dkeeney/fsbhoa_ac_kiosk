@@ -2,11 +2,11 @@
 # kiosk-watchdog - run every minute by kiosk-watchdog.timer (as root). Logs with tag kiosk-watchdog.
 #  1. Server up but the kiosk page has no live connection for NOCONN_RUNS runs: restart the browser.
 #  2. Card reader missing from USB: notice (once an hour).
-#  3. Open hours and no swipe for IDLE_MIN minutes: power-cycle the reader's USB port
+#  3. Open hours and no swipe for IDLE_MIN minutes: cut the reader's USB power for 6 s (uhubctl)
 #     (a hung reader looks connected; resetting a working one is harmless, ~5 s).
 # Usage: kiosk-watchdog [--check] [--reset-scanner]
 #   --check          report only, change nothing
-#   --reset-scanner  power-cycle the reader now
+#   --reset-scanner  cut the reader's power now
 
 . /etc/fsbhoa-kiosk/kiosk.conf
 S=/run/fsbhoa-kiosk; mkdir -p $S
@@ -92,18 +92,25 @@ else
 fi
 
 NAME=$(basename "$DEV")
-PORTDIR=$(ls -d "$(readlink -f "$DEV/..")"/*:1.0/*-port"${NAME##*[-.]}" 2>/dev/null | head -1)
-if [ $CHECK -eq 1 ]; then say "would reset reader at $NAME (port: ${PORTDIR:-none}): $WHY"; exit 0; fi
+HUB=${NAME%[-.]*}; HPORT=${NAME##*[-.]}                     # 1-2 -> hub 1, port 2
+PORTDIR=$(ls -d "$(readlink -f "$DEV/..")"/*:1.0/*-port"$HPORT" 2>/dev/null | head -1)
+if command -v uhubctl >/dev/null; then HOW="uhubctl power cut, hub $HUB port $HPORT"; else HOW="port: ${PORTDIR:-none}"; fi
+if [ $CHECK -eq 1 ]; then say "would reset reader at $NAME ($HOW): $WHY"; exit 0; fi
 
 date +%s > $S/last-reset
-if [ -n "$PORTDIR" ] && [ -w "$PORTDIR/disable" ]; then
-    log "$WHY: power-cycling reader port $(basename $PORTDIR)"
+# A real power cut (uhubctl) is the only thing that un-hangs the reader: on a Pi 5 the
+# sysfs "disable" switch only disconnects the port, the reader stays powered.
+# Tested 2026-11-19: per-port, the touchscreen stays up. Older methods are the fallback.
+if command -v uhubctl >/dev/null && uhubctl -l "$HUB" -p "$HPORT" -a cycle -d 6 >/dev/null 2>&1; then
+    log "$WHY: cut power to reader ($HOW) for 6 s"
+elif [ -n "$PORTDIR" ] && [ -w "$PORTDIR/disable" ]; then
+    log "$WHY: uhubctl failed or missing, disabling reader port $(basename $PORTDIR) (no power cut)"
     echo 1 > "$PORTDIR/disable"; sleep 3; echo 0 > "$PORTDIR/disable"
 else
-    log "$WHY: no port power control, re-authorizing $NAME"
+    log "$WHY: no port control, re-authorizing $NAME"
     echo 0 > "$DEV/authorized"; sleep 3; echo 1 > "$DEV/authorized"
 fi
-for i in $(seq 1 10); do sleep 1; find_dev >/dev/null && { log "reader back after reset"; exit 0; }; done
+for i in $(seq 1 15); do sleep 1; find_dev >/dev/null && { log "reader back after reset"; exit 0; }; done
 log "ERROR: reader $SCANNER_ID did not come back after reset"
 notify_once reader 60 "the card reader did not come back after an automatic reset. Unplug it and plug it back in."
 exit 2

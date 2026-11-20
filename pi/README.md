@@ -24,7 +24,7 @@ The Pi is only a browser. The kiosk service, stations and sign-ins stay on the s
 |---|---|
 | `kiosk-browser.service` | `cage` (one full-screen app, no desktop, no console switching) running `kiosk-browser`: waits until the page answers, then Chromium in kiosk mode with a fresh profile. Restarts if it exits. |
 | `kiosk-swipe-watch.service` | Reads the reader's key events without grabbing them; writes the time of the last swipe to `/run/fsbhoa-kiosk/last-swipe`. Never logs card numbers. |
-| `kiosk-watchdog.timer` (every minute) | Server up but no websocket from the page for 3 runs: restart the browser. Reader missing: notice. 7:00-21:00 and no swipe for 10 min (IDLE_MIN; was 30 until 2026-11-19, when a hung reader sat dead 8 min): power-cycle the reader's USB port (a hung reader looks connected). |
+| `kiosk-watchdog.timer` (every minute) | Server up but no websocket from the page for 3 runs: restart the browser. Reader missing: notice. 7:00-21:00 and no swipe for 10 min (IDLE_MIN; was 30 until 2026-11-19, when a hung reader sat dead 8 min): cut the reader's USB power for 6 s with uhubctl (a hung reader looks connected; only a real power cut un-hangs it, the sysfs port `disable` does not on a Pi 5; per-port, the touchscreen stays up; tested 2026-11-19). |
 | `kiosk-update.timer` (03:00) | If OS updates are waiting: leave `/boot/firmware/kiosk-update-pending`, switch read-only off, reboot. |
 | `kiosk-update-boot.service` | At boot with that note: remove it, install the updates, switch read-only back on, reboot. About 5 minutes, only on nights with updates. |
 
@@ -69,7 +69,7 @@ sudo kiosk-mode readonly     # last
 
 ```bash
 sudo kiosk-watchdog --check            # page connected? reader OK? last swipe?
-sudo kiosk-watchdog --reset-scanner    # power-cycle the reader now
+sudo kiosk-watchdog --reset-scanner    # cut the reader's power now (uhubctl)
 journalctl -t kiosk-watchdog -t kiosk-update -t kiosk-notify
 journalctl -u kiosk-browser -u kiosk-swipe-watch
 ```
