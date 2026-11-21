@@ -14,7 +14,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 
 echo "--- packages"
 apt-get update -q
-DEBIAN_FRONTEND=noninteractive apt-get install -y -q cage chromium python3-evdev jq curl fonts-dejavu-core overlayroot uhubctl
+DEBIAN_FRONTEND=noninteractive apt-get install -y -q cage chromium python3-evdev jq curl fonts-dejavu-core overlayroot uhubctl rsyslog
 
 echo "--- scripts and units"
 for f in kiosk-browser kiosk-swipe-watch kiosk-watchdog kiosk-notify kiosk-mode kiosk-update; do
@@ -24,6 +24,9 @@ for u in kiosk-browser.service kiosk-swipe-watch.service kiosk-watchdog.service 
          kiosk-update.service kiosk-update.timer kiosk-update-boot.service; do
     install -m 644 -o root -g root "$SRC/$u" /etc/systemd/system/
 done
+
+install -m 644 "$SRC/rsyslog-to-nas.conf" /etc/rsyslog.d/00-to-nas.conf   # whole log to the NAS, nothing local
+systemctl restart rsyslog
 
 install -m 644 "$SRC/90-kiosk-no-pointer.rules" /etc/udev/rules.d/   # no mouse devices for cage
 udevadm control --reload

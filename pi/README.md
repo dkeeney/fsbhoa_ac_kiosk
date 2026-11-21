@@ -27,6 +27,7 @@ The Pi is only a browser. The kiosk service, stations and sign-ins stay on the s
 | `kiosk-watchdog.timer` (every minute) | Server up but no websocket from the page for 3 runs: restart the browser. Reader missing: notice. 7:00-21:00 and no swipe for 10 min (IDLE_MIN; was 30 until 2026-11-19, when a hung reader sat dead 8 min): cut the reader's USB power for 6 s with uhubctl (a hung reader looks connected; only a real power cut un-hangs it, the sysfs port `disable` does not on a Pi 5; per-port, the touchscreen stays up; tested 2026-11-19). |
 | `kiosk-update.timer` (03:00) | If OS updates are waiting: leave `/boot/firmware/kiosk-update-pending`, switch read-only off, reboot. |
 | `kiosk-update-boot.service` | At boot with that note: remove it, install the updates, switch read-only back on, reboot. About 5 minutes, only on nights with updates. |
+| `rsyslog` (`/etc/rsyslog.d/00-to-nas.conf`) | Sends the whole log (journal + kernel) to the NAS over TCP 514, keeps no local log files (they would only fill the RAM overlay). Queues in memory while the NAS is away. NAS side: `nas-rsyslog-kiosk.conf` (rsyslog + logrotate + firewall rule). Since 2026-11-21. |
 
 Discord notices (plain, no @everyone) go to core's Access Control channel through `kiosk-notify`.
 The webhook URL is in `/etc/fsbhoa-kiosk/discord.url` (root only; never in git or on the NAS).
@@ -74,7 +75,12 @@ journalctl -t kiosk-watchdog -t kiosk-update -t kiosk-notify
 journalctl -u kiosk-browser -u kiosk-swipe-watch
 ```
 
-The journal is kept only for the current boot while read-only.
+The journal on the Pi is kept only for the current boot while read-only. **Older history is on the NAS** (since 2026-11-21, kept 90 days):
+
+```bash
+ssh nas "sudo grep kiosk-watchdog /var/log/remote/kiosk.log | tail"      # today
+ssh nas "sudo zgrep kiosk-watchdog /var/log/remote/kiosk.log-2026*"     # older days
+```
 
 ## In the lobby (2026-11-18)
 
